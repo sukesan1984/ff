@@ -1,0 +1,30 @@
+; Engine configuration file.
+; Flappy Fever — Godot 4 project
+
+config_version=5
+
+[application]
+
+config/name="Flappy Fever"
+config/description="攻めるほど気持ちいい、フィーバー型フラッピーバード"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.2", "Forward Plus")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=540
+window/size/viewport_height=960
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.13, 0.16, 0.24, 1)
+textures/canvas_textures/default_texture_filter=1

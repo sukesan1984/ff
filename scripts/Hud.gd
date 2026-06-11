@@ -1,0 +1,118 @@
+class_name Hud
+extends Control
+## 最前面のHUD。フィーバーゲージ、発動中パワーアップ、メダルを描画する。
+
+var W := 540.0
+var H := 960.0
+
+var fever := 0.0
+var fever_active := false
+var fever_time := 0.0
+var fever_max := 7.0
+
+var shield := false
+var slowmo_t := 0.0
+var magnet_t := 0.0
+
+var show_medal := false
+var medal := 0  # 0=none,1=bronze,2=silver,3=gold,4=platinum
+
+const MEDAL_COLS := [
+	Color(0.5, 0.5, 0.5),
+	Color(0.80, 0.50, 0.30),
+	Color(0.78, 0.80, 0.85),
+	Color(1.00, 0.82, 0.25),
+	Color(0.55, 0.90, 1.00),
+]
+
+
+func _process(_d: float) -> void:
+	queue_redraw()
+
+
+func _draw() -> void:
+	_draw_fever_bar()
+	_draw_powerups()
+	if show_medal:
+		_draw_medal(Vector2(W * 0.5, H * 0.5 - 70), 46, medal)
+
+
+func _draw_fever_bar() -> void:
+	var bw := 320.0
+	var bh := 20.0
+	var x := (W - bw) * 0.5
+	var y := 132.0
+	# 枠
+	draw_rect(Rect2(x - 3, y - 3, bw + 6, bh + 6), Color(0, 0, 0, 0.35))
+	draw_rect(Rect2(x, y, bw, bh), Color(0.1, 0.1, 0.14, 0.7))
+	# 中身
+	var fill := fever
+	if fever_active:
+		fill = clampf(fever_time / fever_max, 0.0, 1.0)
+	var fw := bw * clampf(fill, 0.0, 1.0)
+	if fw > 1.0:
+		# 虹グラデを縦4頂点ポリゴンで近似(横方向に色変化)
+		var seg := 24
+		for i in range(seg):
+			var f0 := float(i) / seg
+			var f1 := float(i + 1) / seg
+			if f0 > fill:
+				break
+			var sx := x + bw * f0
+			var ex := x + bw * minf(f1, fill)
+			var hue := fposmod(f0 * 0.8 + (fever_time if fever_active else 0.0) * 0.5, 1.0)
+			var c := Color.from_hsv(hue, 0.8, 1.0) if fever_active else Color(1.0, 0.55 + f0 * 0.3, 0.15)
+			draw_rect(Rect2(sx, y, ex - sx + 1, bh), c)
+	# ラベル
+	var f := get_theme_default_font()
+	var fs := 14
+	var txt := "FEVER!!" if fever_active else "FEVER"
+	var col := Color(1, 1, 0.4) if (fever >= 1.0 and not fever_active) else Color(1, 1, 1, 0.85)
+	draw_string(f, Vector2(x + 4, y - 8), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+
+
+func _draw_powerups() -> void:
+	var x := 28.0
+	var y := 200.0
+	if shield:
+		_chip(Vector2(x, y), Color(0.45, 0.78, 1.0), 1.0, "S")
+		y += 56
+	if slowmo_t > 0.0:
+		_chip(Vector2(x, y), Color(0.75, 0.55, 1.0), clampf(slowmo_t / 4.0, 0, 1), "T")
+		y += 56
+	if magnet_t > 0.0:
+		_chip(Vector2(x, y), Color(0.4, 0.95, 0.85), clampf(magnet_t / 6.0, 0, 1), "M")
+		y += 56
+
+
+func _chip(pos: Vector2, col: Color, frac: float, letter: String) -> void:
+	draw_circle(pos, 21, Color(0, 0, 0, 0.35))
+	draw_circle(pos, 19, col.darkened(0.1))
+	draw_circle(pos + Vector2(-5, -5), 9, col.lightened(0.4))
+	# 残量アーク
+	if frac < 1.0:
+		draw_arc(pos, 23, -PI / 2, -PI / 2 + TAU * frac, 28, Color(1, 1, 1, 0.9), 3.0)
+	var f := get_theme_default_font()
+	draw_string(f, pos + Vector2(-6, 6), letter, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1))
+
+
+func _draw_medal(c: Vector2, r: float, level: int) -> void:
+	if level <= 0:
+		return
+	var col: Color = MEDAL_COLS[clampi(level, 0, 4)]
+	# リボン
+	draw_colored_polygon(PackedVector2Array([
+		c + Vector2(-r * 0.5, 0), c + Vector2(-r * 0.2, 0),
+		c + Vector2(-r * 0.2, r * 1.6), c + Vector2(-r * 0.55, r * 1.4)]),
+		Color(0.9, 0.3, 0.3))
+	draw_colored_polygon(PackedVector2Array([
+		c + Vector2(r * 0.5, 0), c + Vector2(r * 0.2, 0),
+		c + Vector2(r * 0.2, r * 1.6), c + Vector2(r * 0.55, r * 1.4)]),
+		Color(0.3, 0.5, 0.9))
+	# メダル本体
+	draw_circle(c, r + 3, Color(0, 0, 0, 0.3))
+	draw_circle(c, r, col.darkened(0.15))
+	draw_circle(c, r * 0.82, col)
+	draw_circle(c, r * 0.82, Color(1, 1, 1, 0.0))
+	draw_arc(c, r * 0.82, 0, TAU, 40, col.lightened(0.4), 3.0)
+	draw_circle(c + Vector2(-r * 0.3, -r * 0.3), r * 0.25, Color(1, 1, 1, 0.4))

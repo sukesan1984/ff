@@ -1,0 +1,14 @@
+# Godot 4
+.godot/
+.import/
+export.cfg
+export_presets.cfg
+*.translation
+
+# 自動生成インポート
+*.import
+
+# Python (sound gen / lint)
+.venv-lint/
+__pycache__/
+*.pyc
