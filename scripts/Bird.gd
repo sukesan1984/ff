@@ -10,6 +10,7 @@ const RADIUS := 17.0  # 当たり判定半径
 var velocity := 0.0
 var alive := true
 var gravity_mult := 1.0   # ローグライク強化(低重力)用
+var max_fall := MAX_FALL  # 落下速度上限(羽のように で下げる)
 var angle := 0.0          # 表示用の傾き(rad)
 var wing := 0.0           # 羽ばたき位相
 var _flap_kick := 0.0     # 羽ばたき直後の強調
@@ -34,8 +35,8 @@ func flap() -> void:
 
 
 func tick(delta: float) -> void:
-	velocity += GRAVITY * delta
-	velocity = minf(velocity, MAX_FALL)
+	velocity += GRAVITY * gravity_mult * delta
+	velocity = minf(velocity, max_fall)
 	position.y += velocity * delta
 	# 上昇で上向き、落下で下向きに傾ける
 	var target := remap(clampf(velocity, FLAP_IMPULSE, MAX_FALL), FLAP_IMPULSE, MAX_FALL, deg_to_rad(-32), deg_to_rad(78))
@@ -75,6 +76,13 @@ func _draw() -> void:
 	if magnet:
 		var pulse := 1.0 + 0.12 * sin(_t * 8.0)
 		draw_arc(Vector2.ZERO, 46 * pulse, 0, TAU, 32, Color(0.4, 0.9, 1.0, 0.5), 3.0)
+
+	# --- フィーバー中の輝き(虹色グロー) ---
+	if fever:
+		var gp := 1.0 + 0.15 * sin(_t * 10.0)
+		for k in 3:
+			var gr := (RADIUS + 10.0 + k * 8.0) * gp
+			draw_circle(Vector2.ZERO, gr, Color.from_hsv(fposmod(_t * 1.5 + k * 0.12, 1.0), 0.8, 1.0, 0.18 - k * 0.04))
 
 	# --- 本体の色(フィーバーは虹) ---
 	var body_col := base_color

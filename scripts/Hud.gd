@@ -16,6 +16,7 @@ var magnet_t := 0.0
 
 var show_medal := false
 var medal := 0  # 0=none,1=bronze,2=silver,3=gold,4=platinum
+var build_list: Array = []  # 所持アビリティ [{short,lv,max,evo}]
 
 const MEDAL_COLS := [
 	Color(0.5, 0.5, 0.5),
@@ -36,11 +37,55 @@ func _process(_d: float) -> void:
 	queue_redraw()
 
 
+var _ft := 0.0
+
 func _draw() -> void:
+	_ft += 0.016
+	if fever_active:
+		_draw_fever_border()
 	_draw_fever_bar()
 	_draw_powerups()
+	_draw_build()
 	if show_medal:
 		_draw_medal(Vector2(W * 0.5, H * 0.5 - 70), 46, medal)
+
+
+func _draw_fever_border() -> void:
+	# フィーバー中:画面ふちに脈打つ虹色ボーダー
+	var thick := 14.0 + 4.0 * sin(_ft * 8.0)
+	var seg := 30
+	for i in seg:
+		var hue := fposmod(float(i) / seg + _ft * 0.6, 1.0)
+		var c := Color.from_hsv(hue, 0.85, 1.0, 0.5)
+		# 上下
+		draw_rect(Rect2(W * i / seg, 0, W / seg + 1, thick), c)
+		draw_rect(Rect2(W * i / seg, H - thick, W / seg + 1, thick), c)
+	for i in seg:
+		var hue2 := fposmod(float(i) / seg + _ft * 0.6 + 0.5, 1.0)
+		var c2 := Color.from_hsv(hue2, 0.85, 1.0, 0.5)
+		draw_rect(Rect2(0, H * i / seg, thick, H / seg + 1), c2)
+		draw_rect(Rect2(W - thick, H * i / seg, thick, H / seg + 1), c2)
+
+
+func _draw_build() -> void:
+	if build_list.is_empty():
+		return
+	var f := _hud_font()
+	var x := W - 150.0
+	var y := 196.0
+	for it in build_list:
+		var evo: bool = it["evo"]
+		var col := Color(1, 0.6, 0.2) if evo else Color(0.5, 0.85, 1.0)
+		draw_rect(Rect2(x, y, 34, 24), Color(0, 0, 0, 0.35))
+		draw_rect(Rect2(x + 1, y + 1, 32, 22), col.darkened(0.05))
+		if f:
+			draw_string(f, Vector2(x + 4, y + 18), str(it["short"]), HORIZONTAL_ALIGNMENT_LEFT, 30, 14, Color(0.1, 0.1, 0.12))
+		var mx: int = it["max"]
+		var lv: int = it["lv"]
+		for i in mx:
+			var on := i < lv
+			draw_circle(Vector2(x + 42 + i * 11, y + 12), 4.0, col if on else Color(1, 1, 1, 0.22))
+		y += 28.0
 
 
 func _draw_fever_bar() -> void:

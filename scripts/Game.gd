@@ -46,31 +46,48 @@ var _last_scores: Array = []
 var ups := {}                  # id -> 取得数
 var _leveling := false
 var _pipes_since_level := 0
-var _revive_used := false
+var _revive_count := 0         # このランで復活した回数
+var _regen_count := 0          # シールド再生用の通過カウンタ
+var _evo_gold := false
+var _evo_phoenix := false
 var cur_radius := 17.0
 var level_box: Control
 var level_cards: Array = []    # 3枚のカードButton
-var _offered: Array = []       # 今提示中のid
+var _offered: Array = []       # 今提示中の定義
 
 const UP_DEFS := [
-	{"id": "small", "name": "ちいさくなる", "desc": "当たり判定が小さくなる", "max": 4},
-	{"id": "float", "name": "ふわり", "desc": "重力が軽くなる", "max": 3},
-	{"id": "slow", "name": "スロー体質", "desc": "全体スピードが遅くなる", "max": 3},
-	{"id": "coin", "name": "こばん大好き", "desc": "コインの価値 +1", "max": 5},
-	{"id": "feverdur", "name": "フィーバー長持ち", "desc": "フィーバーが1秒長く", "max": 4},
-	{"id": "fevergain", "name": "フィーバー体質", "desc": "ゲージが溜まりやすい", "max": 3},
-	{"id": "combo", "name": "コンボ名人", "desc": "コンボ倍率がぐんぐん上がる", "max": 3},
-	{"id": "near", "name": "ニアミスの達人", "desc": "NICE判定が広がりボーナス増", "max": 3},
-	{"id": "magnet", "name": "マグネット体質", "desc": "常にコインを軽く引き寄せる", "max": 3},
-	{"id": "luck", "name": "強運", "desc": "パワーアップが出やすい", "max": 3},
-	{"id": "biglover", "name": "大玉好き", "desc": "でかコインが増え価値も上がる", "max": 3},
-	{"id": "revive", "name": "不死鳥", "desc": "1度だけ復活できる", "max": 1},
+	{"id": "small", "name": "ちいさくなる", "desc": "当たり判定が小さくなる", "short": "小", "max": 4},
+	{"id": "float", "name": "ふわり", "desc": "重力が軽くなる", "short": "浮", "max": 3},
+	{"id": "slow", "name": "スロー体質", "desc": "全体スピードが遅くなる", "short": "遅", "max": 3},
+	{"id": "coin", "name": "こばん大好き", "desc": "コインの価値 +1", "short": "金", "max": 5},
+	{"id": "feverdur", "name": "フィーバー長持ち", "desc": "フィーバーが1秒長く", "short": "熱", "max": 4},
+	{"id": "fevergain", "name": "フィーバー体質", "desc": "ゲージが溜まりやすい", "short": "充", "max": 3},
+	{"id": "combo", "name": "コンボ名人", "desc": "コンボ倍率がぐんぐん上がる", "short": "連", "max": 3},
+	{"id": "near", "name": "ニアミスの達人", "desc": "NICE判定が広がりボーナス増", "short": "際", "max": 3},
+	{"id": "magnet", "name": "マグネット体質", "desc": "常にコインを軽く引き寄せる", "short": "磁", "max": 3},
+	{"id": "luck", "name": "強運", "desc": "パワーアップが出やすい", "short": "運", "max": 3},
+	{"id": "biglover", "name": "大玉好き", "desc": "でかコインが増え価値も上がる", "short": "大", "max": 3},
+	{"id": "midas", "name": "ミダスタッチ", "desc": "フィーバー中コインさらに2倍", "short": "倍", "max": 1},
+	{"id": "nearfever", "name": "際どい快感", "desc": "ニアミスでゲージ大量", "short": "快", "max": 2},
+	{"id": "shieldregen", "name": "守りの心得", "desc": "今すぐ盾＋一定間隔で盾再生", "short": "盾", "max": 2},
+	{"id": "lucky7", "name": "ラッキーナンバー", "desc": "コンボ10ごとに大ボーナス", "short": "7", "max": 3},
+	{"id": "featherfall", "name": "羽のように", "desc": "落下が遅く操作しやすい", "short": "羽", "max": 3},
+	{"id": "satellite", "name": "サテライト子機", "desc": "周回する子機がコイン回収＆ノコギリ破壊", "short": "機", "max": 3},
+	{"id": "revive", "name": "不死鳥", "desc": "1度だけ復活できる", "short": "蘇", "max": 1},
+]
+
+# 進化(シナジー)。前提を満たすと専用カードが出現する
+const EVO_DEFS := [
+	{"id": "evo_gold", "name": "★黄金旋風★", "desc": "コイン全自動回収＋価値1.5倍", "short": "✦金", "req": {"coin": 5, "magnet": 3}},
+	{"id": "evo_phoenix", "name": "★不死鳥転生★", "desc": "復活時にフィーバー＆復活回数+1", "short": "✦蘇", "req": {"revive": 1, "feverdur": 4}},
 ]
 
 # 障害物
 var pipes: Array[Pipe] = []
 var coins: Array[Coin] = []
 var powerups: Array[PowerUp] = []
+var saws: Array[Saw] = []
+var satellites: Array[Satellite] = []
 var spawn_countdown := 200.0
 
 # スコア類
@@ -97,6 +114,8 @@ var invuln_t := 0.0
 var shake := 0.0
 var idle_t := 0.0
 var dead_cd := 0.0
+var _hitstop := 0.0
+var flash_rect: ColorRect
 
 # ===== PV(ニンテンドーダイレクト風デモ録画)用。FF_PV環境変数で有効化 =====
 var _pv := false
@@ -146,8 +165,14 @@ func _ready() -> void:
 	_reset(true)
 	if OS.has_environment("FF_PV"):
 		_pv_setup()
+	elif OS.has_environment("FF_AUTO"):  # 開発用オートプレイ(観察/録画用。本番では未使用)
+		_auto = true
+		_reset(false)
 	else:
 		_refresh_title_rank()
+
+
+var _auto := false  # 開発用オートプレイフラグ
 
 
 # ---------------------------------------------------------------- 構築
@@ -193,6 +218,24 @@ func _build() -> void:
 	hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(hud)
+
+	# 画面フラッシュ(フィーバー突入=白、被弾=赤)
+	flash_rect = ColorRect.new()
+	flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash_rect.color = Color(1, 1, 1, 0)
+	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(flash_rect)
+
+
+func _flash(col: Color, a: float) -> void:
+	if not flash_rect:
+		return
+	flash_rect.color = Color(col.r, col.g, col.b, a)
+	create_tween().tween_property(flash_rect, "color:a", 0.0, 0.35)
+
+
+func _hit_stop(t: float) -> void:
+	_hitstop = maxf(_hitstop, t)
 
 
 func _mk_label(parent: Node, txt: String, y: float, fs: int, col: Color) -> Label:
@@ -383,27 +426,51 @@ func _recompute_passives() -> void:
 	cur_radius = maxf(11.0, 17.0 - _lv("small") * 1.5)
 	if bird:
 		bird.gravity_mult = 1.0 - _lv("float") * 0.07
+		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0
+	_evo_gold = _lv("evo_gold") > 0
+	_evo_phoenix = _lv("evo_phoenix") > 0
+
+
+func _evo_ready(e: Dictionary) -> bool:
+	for k in e["req"]:
+		if _lv(k) < int(e["req"][k]):
+			return false
+	return true
 
 
 func _offer_levelup() -> void:
 	if _leveling or state != PLAY or _pv:
 		return
-	# まだ上限に達していない強化を集める
+	# 進化(条件を満たし未取得)を最優先で出す
+	var evos: Array = []
+	for e in EVO_DEFS:
+		if _lv(e["id"]) == 0 and _evo_ready(e):
+			evos.append(e)
+	# 通常強化(上限未満)
 	var pool: Array = []
 	for d in UP_DEFS:
 		if _lv(d["id"]) < int(d["max"]):
 			pool.append(d)
-	if pool.is_empty():
-		return
 	pool.shuffle()
 	_offered = []
-	for i in mini(3, pool.size()):
-		_offered.append(pool[i])
+	for e in evos:
+		if _offered.size() < 3:
+			_offered.append(e)
+	for d in pool:
+		if _offered.size() < 3:
+			_offered.append(d)
+	if _offered.is_empty():
+		return
 	for i in level_cards.size():
 		var c: Button = level_cards[i]
 		if i < _offered.size():
 			var d = _offered[i]
-			c.text = "%s\n%s  (Lv %d/%d)" % [d["name"], d["desc"], _lv(d["id"]), int(d["max"])]
+			if d.has("req"):  # 進化カード
+				c.text = "%s\n%s" % [d["name"], d["desc"]]
+				c.add_theme_color_override("font_color", Color(1, 0.55, 0.2))
+			else:
+				c.text = "%s\n%s  (Lv %d/%d)" % [d["name"], d["desc"], _lv(d["id"]), int(d["max"])]
+				c.add_theme_color_override("font_color", Color(1, 1, 1))
 			c.visible = true
 		else:
 			c.visible = false
@@ -420,16 +487,27 @@ func _on_card(i: int) -> void:
 	sfx.play("click")
 	_leveling = false
 	level_box.visible = false
-	_floater("%s!" % str(_offered[i]["name"]), bird.position + Vector2(0, -60), Color(1, 0.9, 0.4), 30)
+	_floater("%s!" % str(_offered[i]["name"]), bird.position + Vector2(0, -60), Color(1, 0.9, 0.4), 32)
 
 
 func _apply_upgrade(id: String) -> void:
 	ups[id] = _lv(id) + 1
 	_recompute_passives()
+	# 「守りの心得」は取得した瞬間に盾を1枚張る
+	if id == "shieldregen":
+		shield = true
+		bird.shield = true
+	# サテライト子機を1機追加
+	if id == "satellite":
+		var s := Satellite.new()
+		s.ang = TAU * satellites.size() / 3.0
+		s.position = bird.position
+		world.add_child(s)
+		satellites.append(s)
 
 
 func _do_revive() -> void:
-	_revive_used = true
+	_revive_count += 1
 	bird.velocity = -420.0
 	shield = true
 	bird.shield = true
@@ -438,6 +516,8 @@ func _do_revive() -> void:
 	shake = maxf(shake, 12.0)
 	_burst(bird.position, Color(1, 0.8, 0.3), 30, 300.0, 0.8, 5.0)
 	_floater("ふっかつ！", bird.position + Vector2(0, -60), Color(1, 0.85, 0.3), 40)
+	if _evo_phoenix and not fever_active:
+		_start_fever()  # 不死鳥転生:復活と同時にフィーバー
 
 
 # ---------------------------------------------------------------- 通信
@@ -628,6 +708,9 @@ func _reset(to_title: bool) -> void:
 	magnet_t = 0.0
 	invuln_t = 0.0
 	shake = 0.0
+	_hitstop = 0.0
+	if flash_rect:
+		flash_rect.color = Color(1, 1, 1, 0)
 	spawn_countdown = 200.0
 
 	bird.velocity = 0.0
@@ -642,7 +725,16 @@ func _reset(to_title: bool) -> void:
 	ups.clear()
 	_leveling = false
 	_pipes_since_level = 0
-	_revive_used = false
+	_revive_count = 0
+	_regen_count = 0
+	_evo_gold = false
+	_evo_phoenix = false
+	for s in saws:
+		s.queue_free()
+	saws.clear()
+	for s in satellites:
+		s.queue_free()
+	satellites.clear()
 	if level_box:
 		level_box.visible = false
 	_recompute_passives()
@@ -715,6 +807,12 @@ func _process(delta: float) -> void:
 		DEAD:
 			_update_dead(delta)
 
+	if _auto:  # 開発用オートプレイ
+		if _leveling:
+			_on_card(randi() % 3)
+		elif state == DEAD and dead_cd <= 0.0:
+			_reset(false)
+
 	_update_hud()
 
 
@@ -749,6 +847,18 @@ func _update_dead(delta: float) -> void:
 func _update_play(delta: float) -> void:
 	if _leveling:
 		return  # レベルアップ選択中は世界を止める
+	if _hitstop > 0.0:
+		_hitstop -= delta  # ヒットストップ(手応え演出で一瞬止める)
+		return
+	if _auto:  # 開発用オートAI(隙間中心を狙う)
+		var tgt := 430.0
+		var nx := 1.0e9
+		for p in pipes:
+			if p.position.x + p.width * 0.5 > bird.position.x and p.position.x < nx:
+				nx = p.position.x
+				tgt = p.center
+		if bird.position.y > tgt and bird.velocity > -120.0:
+			bird.flap()
 	if _pv:
 		_pv_ai()
 	var speed_mult := (1.12 if fever_active else 1.0) * (0.5 if slowmo_t > 0.0 else 1.0)
@@ -791,6 +901,13 @@ func _update_play(delta: float) -> void:
 	for u in powerups:
 		u.position.x -= dx
 		u.tick(delta)
+	for s in saws:
+		s.position.x -= dx
+		s.tick(pdelta)
+
+	# サテライト子機:周回＋コイン回収＋ノコギリ破壊
+	if not satellites.is_empty():
+		_update_satellites(delta)
 
 	# マグネット(アイテム中は強力、マグネット体質は常時弱め)
 	var mag_radius := 0.0
@@ -802,6 +919,9 @@ func _update_play(delta: float) -> void:
 	if passive > mag_radius:
 		mag_radius = passive
 		mag_speed = maxf(mag_speed, 300.0)
+	if _evo_gold:  # 黄金旋風:全コイン自動回収
+		mag_radius = 9999.0
+		mag_speed = maxf(mag_speed, 900.0)
 	if mag_radius > 0.0:
 		for c in coins:
 			if c.position.distance_to(bird.position) < mag_radius:
@@ -810,6 +930,9 @@ func _update_play(delta: float) -> void:
 	_check_pipes()
 	if state != PLAY:
 		return  # 被弾でDEADに移行したらこのフレームの残処理を打ち切る
+	_check_saws()
+	if state != PLAY:
+		return
 	_check_pickups()
 	_cleanup()
 
@@ -841,6 +964,10 @@ func _spawn_pipe() -> void:
 		gap += 30.0  # フィーバー中は少し楽に
 	if _pv:
 		gap = 235.0  # PVは見栄え優先で隙間を一定に
+	# ノコギリ付きパイプ(進んでから登場)。隙間は広めにして公平に
+	var has_saw := not _pv and pipes_passed >= 18 and randf() < 0.22
+	if has_saw:
+		gap += 80.0
 	var margin := 90.0
 	var lo := gap * 0.5 + margin
 	var hi := GROUND_Y - gap * 0.5 - margin
@@ -912,6 +1039,12 @@ func _spawn_pipe() -> void:
 	# でかコイン(隙間の端にハグして出現 → 取りに行くとリスク)
 	if randf() < 0.11 + _lv("biglover") * 0.06:
 		_spawn_big_coin(center, gap)
+	# ノコギリ(隙間を上下にスイープ)
+	if has_saw:
+		_spawn_saw(center, gap)
+	# お宝(あえて危険な位置に。高額＆ゲージ大でレベルアップを誘う)
+	if pipes_passed >= 6 and randf() < 0.10 + _lv("biglover") * 0.04:
+		_spawn_treasure(center, gap)
 
 
 func _spawn_coins(x: float, center: float, gap: float) -> void:
@@ -960,6 +1093,36 @@ func _spawn_powerup(x: float, center: float) -> void:
 	powerups.append(u)
 
 
+func _spawn_saw(center: float, gap: float) -> void:
+	var s := Saw.new()
+	s.lo = center - gap * 0.5 + Saw.RADIUS + 4.0
+	s.hi = center + gap * 0.5 - Saw.RADIUS - 4.0
+	s.phase = randf_range(0.0, TAU)
+	s.speed = randf_range(1.6, 2.4)
+	s.position = Vector2(W + 70, center)
+	world.add_child(s)
+	saws.append(s)
+
+
+func _spawn_treasure(center: float, gap: float) -> void:
+	# あえて危険な場所に出す:地面スレスレ / 天井スレスレ / 土管の角
+	var c := Coin.new()
+	c.treasure = true
+	c.value = 35 + pipes_passed / 2 + _lv("biglover") * 12 + _lv("coin") * 2
+	var spot := randi() % 3
+	var y := center
+	match spot:
+		0:
+			y = GROUND_Y - 58.0   # 地面ギリギリ(下に突っ込むリスク)
+		1:
+			y = 64.0              # 天井ギリギリ
+		2:
+			y = center - gap * 0.5 + c.radius() + 4.0  # 上の土管の角にハグ
+	c.position = Vector2(W + 70, clampf(y, 56.0, GROUND_Y - 50.0))
+	world.add_child(c)
+	coins.append(c)
+
+
 # ---------------------------------------------------------------- 当たり判定
 func _check_pipes() -> void:
 	var invincible := fever_active or invuln_t > 0.0
@@ -969,6 +1132,13 @@ func _check_pipes() -> void:
 			p.passed = true
 			pipes_passed += 1
 			_pipes_since_level += 1
+			# シールド再生(守りの心得)
+			_regen_count += 1
+			if _lv("shieldregen") > 0 and not shield and _regen_count >= 20 - _lv("shieldregen") * 4:
+				_regen_count = 0
+				shield = true
+				bird.shield = true
+				_floater("盾 再生", bird.position + Vector2(0, -50), Color(0.6, 0.9, 1), 26)
 			var pts := 2 if fever_active else 1
 			score += pts
 			_add_fever(0.08)
@@ -980,7 +1150,7 @@ func _check_pipes() -> void:
 			if near < near_win and bird.alive:
 				var nb := (2 + _lv("near")) * (2 if fever_active else 1)
 				score += nb
-				_add_fever(0.07)
+				_add_fever(0.07 * (1.0 + _lv("nearfever")))  # 際どい快感
 				shake = maxf(shake, 5.0)
 				sfx.play("nice")
 				_floater("ナイス！ +%d" % nb, bird.position + Vector2(0, -40), Color(0.5, 1, 0.6), 30)
@@ -1014,6 +1184,37 @@ func _circle_rect(c: Vector2, r: float, rect: Rect2) -> bool:
 	return Vector2(nx, ny).distance_to(c) < r
 
 
+func _check_saws() -> void:
+	if fever_active or invuln_t > 0.0:
+		return
+	for s in saws:
+		if s.active() and bird.position.distance_to(s.position) < cur_radius + Saw.RADIUS * 0.8:
+			_on_hit(false)
+			return
+
+
+func _destroy_saw(s: Saw) -> void:
+	saws.erase(s)
+	_burst(s.position, Color(0.8, 0.85, 0.9), 18, 240.0, 0.5, 3.5)
+	sfx.play("hit", 1.4)
+	shake = maxf(shake, 6.0)
+	s.queue_free()
+
+
+func _update_satellites(delta: float) -> void:
+	for s in satellites:
+		s.tick(delta, bird.position)
+		if not s.ready_to_act():
+			continue
+		for c in coins.duplicate():
+			if not c.collected and s.position.distance_to(c.position) < Satellite.COLLECT_R + c.radius() * 0.5:
+				_collect_coin(c)
+		for sw in saws.duplicate():
+			if sw.active() and s.position.distance_to(sw.position) < Satellite.COLLECT_R + Saw.RADIUS * 0.6:
+				_destroy_saw(sw)
+				s.cool = 1.5
+
+
 # ---------------------------------------------------------------- 取得処理
 func _collect_coin(c: Coin) -> void:
 	c.collected = true
@@ -1022,17 +1223,39 @@ func _collect_coin(c: Coin) -> void:
 	var mult := minf(1.0 + combo * (0.15 + _lv("combo") * 0.06), 8.0)
 	var fmult := 2 if fever_active else 1
 	var val := int(round(float(c.value) * mult)) * fmult
+	if fever_active and _lv("midas") > 0:
+		val *= 2  # ミダスタッチ
+	if _evo_gold:
+		val = int(round(val * 1.5))  # 黄金旋風
 	score += val
-	_add_fever(0.10 if c.big else 0.05)
-	var pitch := 0.8 if c.big else 1.0 + minf(combo, 14) * 0.04
+	# お宝ほどゲージが大きく溜まる(=危険を冒すほどレベルアップが近づく)
+	var fgain := 0.05
+	if c.treasure:
+		fgain = 0.30
+	elif c.big:
+		fgain = 0.10
+	_add_fever(fgain)
+	var pitch := 0.7 if (c.big or c.treasure) else 1.0 + minf(combo, 14) * 0.04
 	sfx.play("coin", pitch)
-	var fs := 34 if c.big else 24
-	_burst(c.position, Color(1, 0.85, 0.3), 18 if c.big else 10, 200.0 if c.big else 160.0, 0.6, 4.0 if c.big else 3.0)
-	_floater("+%d" % val, c.position, Color(1, 0.9, 0.4), fs, 60.0 if c.big else 50.0)
-	if c.big:
-		shake = maxf(shake, 8.0)
+	if c.treasure:
+		sfx.play("powerup", 1.0)
+	var fs := 40 if c.treasure else (34 if c.big else 24)
+	var heavy := c.big or c.treasure
+	_burst(c.position, Color(1, 0.85, 0.3), 26 if c.treasure else (18 if c.big else 10), 240.0 if heavy else 160.0, 0.6, 4.5 if heavy else 3.0)
+	_floater("+%d" % val, c.position, Color(1, 0.6, 0.2) if c.treasure else Color(1, 0.9, 0.4), fs, 70.0 if heavy else 50.0)
+	if heavy:
+		shake = maxf(shake, 10.0 if c.treasure else 8.0)
+	if c.treasure:
+		_hit_stop(0.07)
+		_flash(Color(1, 0.85, 0.4), 0.3)
+	# ラッキーナンバー:コンボ10ごとの大ボーナス
 	if combo % 10 == 0:
-		_floater("コンボ x%d！" % combo, bird.position + Vector2(0, -70), Color(1, 0.6, 0.2), 36)
+		var lucky := _lv("lucky7")
+		var bonus := 20 * lucky * fmult
+		if bonus > 0:
+			score += bonus
+			_add_fever(0.05 * lucky)
+		_floater("コンボ x%d！%s" % [combo, ("  +%d" % bonus) if bonus > 0 else ""], bird.position + Vector2(0, -70), Color(1, 0.6, 0.2), 36)
 		shake = maxf(shake, 6.0)
 	coins.erase(c)
 	c.queue_free()
@@ -1078,7 +1301,9 @@ func _start_fever() -> void:
 	fever_gauge = 1.0
 	bird.fever = true
 	sfx.play("fever")
-	shake = maxf(shake, 14.0)
+	shake = maxf(shake, 16.0)
+	_hit_stop(0.10)
+	_flash(Color(1, 1, 1), 0.55)
 	_burst(bird.position, Color(1, 0.7, 0.2), 40, 320.0, 0.8, 5.0)
 	_floater("フィーバー！！", Vector2(W * 0.5, H * 0.42), Color(1, 0.85, 0.2), 44)
 
@@ -1117,8 +1342,9 @@ func _on_hit(is_ground: bool) -> void:
 func _die() -> void:
 	if state == DEAD:
 		return
-	# 不死鳥:1ラン1回だけ復活(PV中は無効)
-	if not _pv and _lv("revive") > 0 and not _revive_used:
+	# 不死鳥:復活(転生で回数+1。PV中は無効)
+	var max_revives := (1 if _lv("revive") > 0 else 0) + (1 if _evo_phoenix else 0)
+	if not _pv and _revive_count < max_revives:
 		_do_revive()
 		return
 	state = DEAD
@@ -1128,7 +1354,9 @@ func _die() -> void:
 	dead_cd = 0.6
 	sfx.play("hit")
 	sfx.play("die")
-	shake = maxf(shake, 18.0)
+	shake = maxf(shake, 20.0)
+	_hit_stop(0.12)
+	_flash(Color(1, 0.2, 0.15), 0.5)
 	_burst(bird.position, Color(1, 0.5, 0.2), 32, 300.0, 0.8, 4.5)
 	_burst(bird.position, Color.WHITE, 16, 200.0, 0.6, 3.0)
 
@@ -1191,6 +1419,14 @@ func _cleanup() -> void:
 			alive_pu.append(u)
 	powerups = alive_pu
 
+	var alive_saws: Array[Saw] = []
+	for s in saws:
+		if s.position.x < -80.0:
+			s.queue_free()
+		else:
+			alive_saws.append(s)
+	saws = alive_saws
+
 
 # ---------------------------------------------------------------- HUD更新
 func _update_hud() -> void:
@@ -1201,6 +1437,20 @@ func _update_hud() -> void:
 	hud.shield = shield
 	hud.slowmo_t = slowmo_t
 	hud.magnet_t = magnet_t
+	hud.build_list = _build_summary()
+
+
+func _build_summary() -> Array:
+	# 所持アビリティ一覧(HUD右側表示用)
+	var out: Array = []
+	for d in UP_DEFS:
+		var lv := _lv(d["id"])
+		if lv > 0:
+			out.append({"short": d["short"], "lv": lv, "max": int(d["max"]), "evo": false})
+	for e in EVO_DEFS:
+		if _lv(e["id"]) > 0:
+			out.append({"short": e["short"], "lv": 1, "max": 1, "evo": true})
+	return out
 
 
 func _update_combo_label() -> void:

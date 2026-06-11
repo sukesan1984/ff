@@ -7,7 +7,9 @@ var collected := false
 var spin := 0.0
 var value := 2       # 取得時の基礎価値
 var big := false     # でかいコイン(高価値だがリスキーな位置に出る)
+var treasure := false  # お宝(超高額・大量ゲージ。あえて危険な位置に出る)
 var _t := 0.0
+var _font := load("res://fonts/MochiyPopOne-Regular.ttf")
 
 
 func _ready() -> void:
@@ -15,6 +17,8 @@ func _ready() -> void:
 
 
 func radius() -> float:
+	if treasure:
+		return 30.0
 	return 28.0 if big else RADIUS
 
 
@@ -31,8 +35,24 @@ func _draw() -> void:
 	sx = 0.25 + sx * 0.75
 	var edge := Color(0.95, 0.62, 0.05) if big else Color(0.85, 0.6, 0.1)
 	var face := Color(1.0, 0.88, 0.2) if big else Color(1.0, 0.84, 0.25)
+	# お宝は危険を煽る赤金の後光＋価値表示
+	if treasure:
+		var pz := 1.0 + 0.18 * sin(_t * 6.0)
+		draw_circle(Vector2.ZERO, (r + 16) * pz, Color(1.0, 0.5, 0.1, 0.22))
+		draw_arc(Vector2.ZERO, (r + 12) * pz, 0, TAU, 28, Color(1.0, 0.85, 0.3, 0.9), 3.0)
+		# キラキラ放射
+		for i in 8:
+			var a := _t * 2.0 + TAU * i / 8.0
+			draw_line(Vector2(cos(a), sin(a)) * (r + 6), Vector2(cos(a), sin(a)) * (r + 18 * pz), Color(1, 0.9, 0.4, 0.5), 2.0)
+		edge = Color(1.0, 0.55, 0.05)
+		face = Color(1.0, 0.92, 0.3)
+		if _font:
+			var label := "+%d" % value
+			var w: float = _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+			draw_string_outline(_font, Vector2(-w * 0.5, -r - 14), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.7))
+			draw_string(_font, Vector2(-w * 0.5, -r - 14), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 0.95, 0.4))
 	# でかコインは後光
-	if big:
+	elif big:
 		var pulse := 1.0 + 0.1 * sin(_t * 4.0)
 		draw_circle(Vector2.ZERO, (r + 10) * pulse, Color(1.0, 0.85, 0.2, 0.18))
 	# 影
