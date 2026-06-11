@@ -24,6 +24,8 @@ var sfx: Sfx
 var score_label: Label
 var multi_label: Label
 var title_box: Control
+var help_box: Control
+var _help_open := false
 var over_box: Control
 var over_score: Label
 var over_best: Label
@@ -280,6 +282,7 @@ func _build() -> void:
 	_build_over()
 	_build_leaderboard()
 	_build_levelup()
+	_build_help()
 
 	# HUDは最後に追加して最前面に(メダルがパネルに隠れないように)
 	hud = Hud.new()
@@ -361,10 +364,58 @@ func _build_title() -> void:
 	title_rank.add_theme_constant_override("separation", 4)
 	title_rank.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_box.add_child(title_rank)
+	_mk_button(title_box, "あそびかた", Vector2(W * 0.5 - 90, 868), Vector2(180, 50), _open_help)
 	# 点滅
 	var tw := create_tween().set_loops()
 	tw.tween_property(tap, "modulate:a", 0.25, 0.6).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(tap, "modulate:a", 1.0, 0.6).set_trans(Tween.TRANS_SINE)
+
+
+func _build_help() -> void:
+	help_box = Control.new()
+	help_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	help_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(help_box)
+	var p := ColorRect.new()
+	p.color = Color(0.05, 0.07, 0.12, 0.96)
+	p.position = Vector2(28, 96)
+	p.size = Vector2(W - 56, 760)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	help_box.add_child(p)
+	_mk_label(help_box, "あそびかた", 116, 40, Color(1, 0.9, 0.4))
+	var body := Label.new()
+	body.position = Vector2(52, 180)
+	body.size = Vector2(W - 104, 600)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_theme_font_size_override("font_size", 21)
+	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	body.add_theme_constant_override("line_spacing", 6)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.text = "【そうさ】タップ／スペースで羽ばたく\n【もくてき】土管のすき間をくぐってスコアを稼ぐ\n\n" + \
+		"◆ コイン：集めてフィーバーゲージを溜める\n" + \
+		"◆ コンボ：連続取得で倍率アップ\n" + \
+		"◆ ニアミス：土管スレスレ通過でボーナス＆ゲージ大\n" + \
+		"◆ フィーバー：ゲージMAXで無敵＆スコア2倍！\n　 突入の直前に強化カードを1枚選べる\n" + \
+		"◆ レベルアップ：カードでビルドを構築(2回タップで決定)\n　 組み合わせ次第で…まれに強力な掘り出し物も？\n" + \
+		"◆ お宝：危険な場所ほど高得点＆ゲージ大。リスク&リターン\n" + \
+		"◆ ノコギリ：当たると一発。無敵や盾で防げる\n" + \
+		"◆ バイオーム：進むと地帯が変化(重力・速度・すき間も)\n" + \
+		"◆ メダル＆ランキング：スコアで世界と競え！"
+	help_box.add_child(body)
+	_mk_button(help_box, "とじる", Vector2(W * 0.5 - 80, 786), Vector2(160, 50), _close_help)
+	help_box.visible = false
+
+
+func _open_help() -> void:
+	sfx.play("click")
+	_help_open = true
+	help_box.visible = true
+
+
+func _close_help() -> void:
+	sfx.play("click")
+	_help_open = false
+	help_box.visible = false
 
 
 func _build_over() -> void:
@@ -1028,6 +1079,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match state:
 		TITLE:
+			if _help_open:
+				return  # ヘルプ表示中はタップで開始しない
 			sfx.play("click")
 			_reset(false)
 		PLAY:
