@@ -403,18 +403,47 @@ func _build_levelup() -> void:
 	bg2.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg2.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	level_box.add_child(bg2)
-	_mk_label(level_box, "レベルアップ！", 250, 46, Color(1, 0.9, 0.35))
-	_mk_label(level_box, "1つ選ぶ", 308, 24, Color(1, 1, 1, 0.85))
+	_mk_label(level_box, "★ レベルアップ！ ★", 244, 46, Color(1, 0.9, 0.35))
+	_mk_label(level_box, "1つ選ぶ", 304, 24, Color(1, 1, 1, 0.85))
 	for i in 3:
-		var c := Button.new()
-		c.position = Vector2(60, 360 + i * 130)
-		c.custom_minimum_size = Vector2(W - 120, 116)
-		c.size = Vector2(W - 120, 116)
-		c.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		c.add_theme_font_size_override("font_size", 23)
-		c.pressed.connect(_on_card.bind(i))
-		level_box.add_child(c)
-		level_cards.append(c)
+		var card := Button.new()
+		card.position = Vector2(45, 348 + i * 128)
+		card.custom_minimum_size = Vector2(W - 90, 116)
+		card.size = Vector2(W - 90, 116)
+		card.pressed.connect(_on_card.bind(i))
+		var sb := StyleBoxFlat.new()
+		sb.set_corner_radius_all(16)
+		sb.set_border_width_all(3)
+		card.add_theme_stylebox_override("normal", sb)
+		card.add_theme_stylebox_override("hover", sb)
+		card.add_theme_stylebox_override("pressed", sb)
+		card.add_theme_stylebox_override("focus", sb)
+		level_box.add_child(card)
+		var icon := Label.new()
+		icon.position = Vector2(14, 24)
+		icon.size = Vector2(68, 68)
+		icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		icon.add_theme_font_size_override("font_size", 36)
+		icon.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
+		icon.add_theme_constant_override("outline_size", 5)
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(icon)
+		var nm := Label.new()
+		nm.position = Vector2(92, 16)
+		nm.size = Vector2(W - 200, 40)
+		nm.add_theme_font_size_override("font_size", 27)
+		nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(nm)
+		var ds := Label.new()
+		ds.position = Vector2(92, 58)
+		ds.size = Vector2(W - 200, 50)
+		ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ds.add_theme_font_size_override("font_size", 18)
+		ds.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
+		ds.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(ds)
+		level_cards.append({"btn": card, "sb": sb, "icon": icon, "name": nm, "desc": ds})
 	level_box.visible = false
 
 
@@ -462,18 +491,29 @@ func _offer_levelup() -> void:
 	if _offered.is_empty():
 		return
 	for i in level_cards.size():
-		var c: Button = level_cards[i]
+		var cd = level_cards[i]
+		var btn: Button = cd["btn"]
 		if i < _offered.size():
 			var d = _offered[i]
-			if d.has("req"):  # 進化カード
-				c.text = "%s\n%s" % [d["name"], d["desc"]]
-				c.add_theme_color_override("font_color", Color(1, 0.55, 0.2))
+			var evo: bool = d.has("req")
+			var sb: StyleBoxFlat = cd["sb"]
+			if evo:
+				sb.bg_color = Color(0.45, 0.18, 0.04, 0.95)
+				sb.border_color = Color(1, 0.7, 0.2)
+				cd["icon"].add_theme_color_override("font_color", Color(1, 0.85, 0.35))
+				cd["name"].add_theme_color_override("font_color", Color(1, 0.85, 0.35))
+				cd["desc"].text = str(d["desc"])
 			else:
-				c.text = "%s\n%s  (Lv %d/%d)" % [d["name"], d["desc"], _lv(d["id"]), int(d["max"])]
-				c.add_theme_color_override("font_color", Color(1, 1, 1))
-			c.visible = true
+				sb.bg_color = Color(0.1, 0.18, 0.3, 0.95)
+				sb.border_color = Color(0.4, 0.72, 1.0)
+				cd["icon"].add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
+				cd["name"].add_theme_color_override("font_color", Color(1, 1, 1))
+				cd["desc"].text = "%s   Lv %d→%d" % [d["desc"], _lv(d["id"]), _lv(d["id"]) + 1]
+			cd["icon"].text = str(d["short"])
+			cd["name"].text = str(d["name"])
+			btn.visible = true
 		else:
-			c.visible = false
+			btn.visible = false
 	_leveling = true
 	_pipes_since_level = 0
 	level_box.visible = true
