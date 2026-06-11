@@ -52,6 +52,10 @@ var _revive_count := 0         # このランで復活した回数
 var _regen_count := 0          # シールド再生用の通過カウンタ
 var _evo_gold := false
 var _evo_phoenix := false
+var _evo_dodge := false
+var _evo_drone := false
+var _evo_engine := false
+var _evo_greed := false
 # ユニーク効果フラグ
 var _u_midas := false
 var _u_hourglass := false
@@ -107,6 +111,10 @@ const RAR_BG := [
 const EVO_DEFS := [
 	{"id": "evo_gold", "name": "★黄金旋風★", "desc": "コイン全自動回収＋価値1.5倍", "short": "旋", "req": {"coin": 5, "magnet": 3}},
 	{"id": "evo_phoenix", "name": "★不死鳥転生★", "desc": "復活時にフィーバー＆復活回数+1", "short": "転", "req": {"revive": 1, "feverdur": 4}},
+	{"id": "evo_dodge", "name": "★絶対回避★", "desc": "ノコギリ無効＋極小の当たり判定", "short": "避", "req": {"small": 4, "slow": 3}},
+	{"id": "evo_drone", "name": "★ドローン軍団★", "desc": "子機+1・回収範囲特大・破壊し放題", "short": "軍", "req": {"satellite": 3}},
+	{"id": "evo_engine", "name": "★永久機関★", "desc": "フィーバー超長持ち＆ゲージ獲得1.5倍", "short": "永", "req": {"fevergain": 3, "feverdur": 4}},
+	{"id": "evo_greed", "name": "★金の亡者★", "desc": "コインがすべて巨大化(高額)", "short": "亡", "req": {"coin": 5, "biglover": 3}},
 ]
 
 # ユニーク(固有)アイテム=稀ドロップの「やった！」枠(ディアブロのトレハン感)。各1回のみ
@@ -603,6 +611,10 @@ func _recompute_passives() -> void:
 	_u_aegis = _lv("u_aegis") > 0
 	_evo_gold = _lv("evo_gold") > 0 or _lv("u_magnetking") > 0
 	_evo_phoenix = _lv("evo_phoenix") > 0 or _lv("u_phoenixheart") > 0
+	_evo_dodge = _lv("evo_dodge") > 0
+	_evo_drone = _lv("evo_drone") > 0
+	_evo_engine = _lv("evo_engine") > 0
+	_evo_greed = _lv("evo_greed") > 0
 	if bird:
 		bird.gravity_mult = (1.0 - _lv("float") * 0.07) * _biome_grav * (0.7 if _u_cloak else 1.0)
 		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0 - (260.0 if _u_cloak else 0.0)
@@ -800,6 +812,9 @@ func _apply_upgrade(id: String) -> void:
 	# ユニーク:サテライト群=一気に2機
 	if id == "u_swarm":
 		_add_satellite()
+		_add_satellite()
+	# 進化:ドローン軍団=子機+1
+	if id == "evo_drone":
 		_add_satellite()
 
 
@@ -1391,6 +1406,9 @@ func _spawn_coins(x: float, center: float, gap: float) -> void:
 	for i in n:
 		var c := Coin.new()
 		c.value = 2 + _lv("coin")
+		if _evo_greed:  # 金の亡者:コインが全て巨大化
+			c.big = true
+			c.value = 12 + _lv("coin") * 2
 		var t := float(i) - (n - 1) * 0.5
 		var ox := 0.0
 		var oy := 0.0
@@ -1524,7 +1542,7 @@ func _circle_rect(c: Vector2, r: float, rect: Rect2) -> bool:
 
 
 func _check_saws() -> void:
-	if fever_active or invuln_t > 0.0:
+	if fever_active or invuln_t > 0.0 or _evo_dodge:
 		return
 	for s in saws:
 		if s.active() and bird.position.distance_to(s.position) < cur_radius + Saw.RADIUS * 0.8:
@@ -1541,17 +1559,18 @@ func _destroy_saw(s: Saw) -> void:
 
 
 func _update_satellites(delta: float) -> void:
+	var cr := Satellite.COLLECT_R * (1.7 if _evo_drone else 1.0)  # ドローン軍団=回収範囲特大
 	for s in satellites:
 		s.tick(delta, bird.position)
 		if not s.ready_to_act():
 			continue
 		for c in coins.duplicate():
-			if not c.collected and s.position.distance_to(c.position) < Satellite.COLLECT_R + c.radius() * 0.5:
+			if not c.collected and s.position.distance_to(c.position) < cr + c.radius() * 0.5:
 				_collect_coin(c)
 		for sw in saws.duplicate():
-			if sw.active() and s.position.distance_to(sw.position) < Satellite.COLLECT_R + Saw.RADIUS * 0.6:
+			if sw.active() and s.position.distance_to(sw.position) < cr + Saw.RADIUS * 0.6:
 				_destroy_saw(sw)
-				s.cool = 1.5
+				s.cool = 0.0 if _evo_drone else 1.5  # 軍団は破壊し放題
 
 
 # ---------------------------------------------------------------- 取得処理
@@ -1634,6 +1653,8 @@ func _add_fever(a: float) -> void:
 	var mult := 1.0 + _lv("fevergain") * 0.25  # フィーバー体質
 	if _u_feverheart:
 		mult *= 2.0  # フィーバーの心臓
+	if _evo_engine:
+		mult *= 1.5  # 永久機関
 	fever_gauge += a * mult
 	if fever_gauge >= 1.0:
 		# ゲージ満タン:先にレベルアップを選ばせ、確定後にフィーバー(無敵)へ
@@ -1646,7 +1667,7 @@ func _add_fever(a: float) -> void:
 
 
 func _fever_dur() -> float:
-	return FEVER_DUR + _lv("feverdur") + (4.0 if _u_feverheart else 0.0)
+	return FEVER_DUR + _lv("feverdur") + (4.0 if _u_feverheart else 0.0) + (6.0 if _evo_engine else 0.0)
 
 
 func _start_fever() -> void:
