@@ -1,0 +1,18 @@
+# Cloud Build へ送るのは Dockerfile / build/web / deploy/nginx.conf のみで十分
+.git/
+.gitignore
+.dockerignore
+*.mp4
+*.md
+*.py
+*.tscn
+*.svg
+project.godot
+export_presets.cfg
+scripts/
+sounds/
+fonts/
+.godot/
+.venv-lint/
+__pycache__/
+*.import

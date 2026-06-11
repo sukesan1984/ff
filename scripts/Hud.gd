@@ -26,6 +26,12 @@ const MEDAL_COLS := [
 ]
 
 
+var _font := load("res://fonts/MochiyPopOne-Regular.ttf")
+
+func _hud_font() -> Font:
+	return _font if _font else get_theme_default_font()
+
+
 func _process(_d: float) -> void:
 	queue_redraw()
 
@@ -64,24 +70,25 @@ func _draw_fever_bar() -> void:
 			var c := Color.from_hsv(hue, 0.8, 1.0) if fever_active else Color(1.0, 0.55 + f0 * 0.3, 0.15)
 			draw_rect(Rect2(sx, y, ex - sx + 1, bh), c)
 	# ラベル
-	var f := get_theme_default_font()
-	var fs := 14
-	var txt := "FEVER!!" if fever_active else "FEVER"
+	var f := _hud_font()
+	var fs := 15
+	var txt := "フィーバー！" if fever_active else "フィーバー"
 	var col := Color(1, 1, 0.4) if (fever >= 1.0 and not fever_active) else Color(1, 1, 1, 0.85)
-	draw_string(f, Vector2(x + 4, y - 8), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+	if f:
+		draw_string(f, Vector2(x + 2, y - 7), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 func _draw_powerups() -> void:
 	var x := 28.0
 	var y := 200.0
 	if shield:
-		_chip(Vector2(x, y), Color(0.45, 0.78, 1.0), 1.0, "S")
+		_chip(Vector2(x, y), Color(0.45, 0.78, 1.0), 1.0, "盾")
 		y += 56
 	if slowmo_t > 0.0:
-		_chip(Vector2(x, y), Color(0.75, 0.55, 1.0), clampf(slowmo_t / 4.0, 0, 1), "T")
+		_chip(Vector2(x, y), Color(0.75, 0.55, 1.0), clampf(slowmo_t / 4.0, 0, 1), "時")
 		y += 56
 	if magnet_t > 0.0:
-		_chip(Vector2(x, y), Color(0.4, 0.95, 0.85), clampf(magnet_t / 6.0, 0, 1), "M")
+		_chip(Vector2(x, y), Color(0.4, 0.95, 0.85), clampf(magnet_t / 6.0, 0, 1), "磁")
 		y += 56
 
 
@@ -92,8 +99,9 @@ func _chip(pos: Vector2, col: Color, frac: float, letter: String) -> void:
 	# 残量アーク
 	if frac < 1.0:
 		draw_arc(pos, 23, -PI / 2, -PI / 2 + TAU * frac, 28, Color(1, 1, 1, 0.9), 3.0)
-	var f := get_theme_default_font()
-	draw_string(f, pos + Vector2(-6, 6), letter, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1))
+	var f := _hud_font()
+	if f:
+		draw_string(f, pos + Vector2(-9, 7), letter, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1, 1, 1))
 
 
 func _draw_medal(c: Vector2, r: float, level: int) -> void:

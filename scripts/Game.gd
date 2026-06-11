@@ -30,6 +30,43 @@ var over_best: Label
 var over_medal: Label
 var over_new: Label
 
+# ランキング(リーダーボード)
+var name_box: Control
+var name_display: Label   # 画面内キーボードで入力中の名前表示
+var entry_text := ""
+var rank_box: Control
+var rank_list: VBoxContainer
+var rank_title: Label
+var title_rank: VBoxContainer
+var _modal := false
+var _player_name := ""
+var _last_scores: Array = []
+
+# ローグライク(レベルアップ強化。フィーバー終了で1枚選ぶ)
+var ups := {}                  # id -> 取得数
+var _leveling := false
+var _pipes_since_level := 0
+var _revive_used := false
+var cur_radius := 17.0
+var level_box: Control
+var level_cards: Array = []    # 3枚のカードButton
+var _offered: Array = []       # 今提示中のid
+
+const UP_DEFS := [
+	{"id": "small", "name": "ちいさくなる", "desc": "当たり判定が小さくなる", "max": 4},
+	{"id": "float", "name": "ふわり", "desc": "重力が軽くなる", "max": 3},
+	{"id": "slow", "name": "スロー体質", "desc": "全体スピードが遅くなる", "max": 3},
+	{"id": "coin", "name": "こばん大好き", "desc": "コインの価値 +1", "max": 5},
+	{"id": "feverdur", "name": "フィーバー長持ち", "desc": "フィーバーが1秒長く", "max": 4},
+	{"id": "fevergain", "name": "フィーバー体質", "desc": "ゲージが溜まりやすい", "max": 3},
+	{"id": "combo", "name": "コンボ名人", "desc": "コンボ倍率がぐんぐん上がる", "max": 3},
+	{"id": "near", "name": "ニアミスの達人", "desc": "NICE判定が広がりボーナス増", "max": 3},
+	{"id": "magnet", "name": "マグネット体質", "desc": "常にコインを軽く引き寄せる", "max": 3},
+	{"id": "luck", "name": "強運", "desc": "パワーアップが出やすい", "max": 3},
+	{"id": "biglover", "name": "大玉好き", "desc": "でかコインが増え価値も上がる", "max": 3},
+	{"id": "revive", "name": "不死鳥", "desc": "1度だけ復活できる", "max": 1},
+]
+
 # 障害物
 var pipes: Array[Pipe] = []
 var coins: Array[Coin] = []
@@ -41,6 +78,7 @@ var score := 0
 var best := 0
 var combo := 0
 var coins_collected := 0
+var pipes_passed := 0   # 難易度はスコアでなく通過パイプ数で決める(フィーバーで跳ねないように)
 var scroll_speed := BASE_SPEED
 
 # フィーバー
@@ -60,12 +98,56 @@ var shake := 0.0
 var idle_t := 0.0
 var dead_cd := 0.0
 
+# ===== PV(ニンテンドーダイレクト風デモ録画)用。FF_PV環境変数で有効化 =====
+var _pv := false
+var _pv_t := 0.0
+var _pv_pipe_n := 0
+var _pv_cap_idx := 0
+var _pv_scene_idx := 0
+var _pv_scene := "intro"
+var _pv_dead_done := false
+var _pv_revealed := false
+var _pv_ended := false
+var _pv_pending_pu := -1
+var _pv_layer: CanvasLayer
+var _pv_fade: ColorRect
+var _pv_bar_top: ColorRect
+var _pv_bar_bot: ColorRect
+var _pv_title: Control
+
+# [開始時刻, シーン名] — シーンごとにAIと生成の挙動を切り替える
+const PV_SCENES := [
+	[2.3, "basic"],
+	[8.5, "combo"],
+	[14.5, "shield"],
+	[19.5, "slowmo"],
+	[24.0, "magnet"],
+	[28.0, "fever"],
+	[35.5, "medal"],
+	[38.5, "end"],
+]
+
+# [時刻, テキスト](下三分の一の日本語キャプション。ナレーションと連動)
+const PV_CAPS := [
+	[3.0, "ワンタップで土管をくぐれ！"],
+	[9.0, "コインを集めてコンボ！スコア倍増"],
+	[15.0, "シールド：一度だけ衝突を防ぐ"],
+	[20.0, "スローモー：世界がゆっくりに"],
+	[24.5, "マグネット：コインを引き寄せる"],
+	[28.5, "フィーバー：無敵で土管を貫通！スコア2倍"],
+	[36.0, "記録に応じてメダル獲得！"],
+]
+
 
 func _ready() -> void:
 	randomize()
 	load_best()
 	_build()
 	_reset(true)
+	if OS.has_environment("FF_PV"):
+		_pv_setup()
+	else:
+		_refresh_title_rank()
 
 
 # ---------------------------------------------------------------- 構築
@@ -101,6 +183,8 @@ func _build() -> void:
 
 	_build_title()
 	_build_over()
+	_build_leaderboard()
+	_build_levelup()
 
 	# HUDは最後に追加して最前面に(メダルがパネルに隠れないように)
 	hud = Hud.new()
@@ -132,12 +216,20 @@ func _build_title() -> void:
 	title_box.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(title_box)
-	_mk_label(title_box, "FLAPPY", 250, 76, Color(1, 0.85, 0.25))
-	_mk_label(title_box, "FEVER", 326, 88, Color(1, 0.45, 0.35))
-	_mk_label(title_box, "Collect coins to fill the gauge -> FEVER!", 440, 20, Color(1, 1, 1, 0.92))
-	_mk_label(title_box, "Skim the pipes for a NICE! bonus", 470, 20, Color(1, 1, 1, 0.8))
-	var tap := _mk_label(title_box, "TAP / SPACE TO START", 600, 30, Color.WHITE)
-	_mk_label(title_box, "BEST  " + str(best), 660, 26, Color(1, 1, 0.6))
+	_mk_label(title_box, "FLAPPY", 210, 74, Color(1, 0.85, 0.25))
+	_mk_label(title_box, "FEVER", 284, 86, Color(1, 0.45, 0.35))
+	_mk_label(title_box, "コインを集めてゲージMAXでフィーバー！", 392, 21, Color(1, 1, 1, 0.92))
+	_mk_label(title_box, "土管スレスレ通過でNICE！ボーナス", 420, 21, Color(1, 1, 1, 0.8))
+	var tap := _mk_label(title_box, "タップ／スペースでスタート", 470, 28, Color.WHITE)
+	_mk_label(title_box, "ベスト  " + str(best), 516, 24, Color(1, 1, 0.6))
+	# ランキング(タイトル上のTOP表示)
+	_mk_label(title_box, "★ ランキング ★", 580, 28, Color(1, 0.9, 0.4))
+	title_rank = VBoxContainer.new()
+	title_rank.position = Vector2(90, 624)
+	title_rank.size = Vector2(W - 180, 220)
+	title_rank.add_theme_constant_override("separation", 4)
+	title_rank.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title_box.add_child(title_rank)
 	# 点滅
 	var tw := create_tween().set_loops()
 	tw.tween_property(tap, "modulate:a", 0.25, 0.6).set_trans(Tween.TRANS_SINE)
@@ -156,14 +248,359 @@ func _build_over() -> void:
 	panel.size = Vector2(W - 120, 360)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	over_box.add_child(panel)
-	_mk_label(over_box, "GAME OVER", 330, 54, Color(1, 0.4, 0.35))
+	_mk_label(over_box, "ゲームオーバー", 326, 50, Color(1, 0.4, 0.35))
 	over_medal = _mk_label(over_box, "", 470, 30, Color(1, 1, 1))
-	over_score = _mk_label(over_box, "SCORE 0", 510, 34, Color.WHITE)
-	over_best = _mk_label(over_box, "BEST 0", 552, 26, Color(1, 1, 0.6))
-	over_new = _mk_label(over_box, "★ NEW BEST! ★", 590, 26, Color(0.4, 1, 0.5))
+	over_score = _mk_label(over_box, "スコア 0", 510, 34, Color.WHITE)
+	over_best = _mk_label(over_box, "ベスト 0", 552, 26, Color(1, 1, 0.6))
+	over_new = _mk_label(over_box, "★ 自己ベスト更新！ ★", 588, 24, Color(0.4, 1, 0.5))
 	over_new.visible = false
-	_mk_label(over_box, "TAP TO RETRY", 700, 28, Color.WHITE)
+	_mk_button(over_box, "ランキングを見る", Vector2(W * 0.5 - 110, 624), Vector2(220, 50), _open_ranking)
+	_mk_label(over_box, "タップでリトライ", 706, 26, Color.WHITE)
 	over_box.visible = false
+
+
+func _mk_button(parent: Node, text: String, pos: Vector2, sz: Vector2, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.position = pos
+	b.size = sz
+	b.add_theme_font_size_override("font_size", 24)
+	b.pressed.connect(cb)
+	parent.add_child(b)
+	return b
+
+
+# ---------------------------------------------------------------- ランキングUI
+func _build_leaderboard() -> void:
+	# 名前入力
+	name_box = Control.new()
+	name_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	name_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(name_box)
+	var np := ColorRect.new()
+	np.color = Color(0, 0, 0, 0.66)
+	np.position = Vector2(30, 232)
+	np.size = Vector2(W - 60, 520)
+	np.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_box.add_child(np)
+	_mk_label(name_box, "ランキング入り！", 250, 36, Color(1, 0.85, 0.3))
+	_mk_label(name_box, "なまえを入れてね(タップ)", 298, 19, Color(1, 1, 1, 0.85))
+	name_display = _mk_label(name_box, "", 332, 40, Color.WHITE)
+	# 画面内キーボード(OSキーボードに依存しないので全環境で動く)
+	var grid := GridContainer.new()
+	grid.columns = 7
+	grid.position = Vector2(48, 400)
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	name_box.add_child(grid)
+	var chars := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	for i in chars.length():
+		var ch := chars[i]
+		var b := Button.new()
+		b.text = ch
+		b.custom_minimum_size = Vector2(58, 50)
+		b.add_theme_font_size_override("font_size", 22)
+		b.pressed.connect(_name_add.bind(ch))
+		grid.add_child(b)
+	_mk_button(name_box, "←消す", Vector2(48, 612), Vector2(130, 52), _name_del)
+	_mk_button(name_box, "スキップ", Vector2(W - 48 - 130, 612), Vector2(130, 52), _on_skip)
+	_mk_button(name_box, "登録する", Vector2(W * 0.5 - 100, 680), Vector2(200, 58), _on_register)
+	name_box.visible = false
+
+	# ランキング一覧
+	rank_box = Control.new()
+	rank_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rank_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(rank_box)
+	var rp := ColorRect.new()
+	rp.color = Color(0, 0, 0, 0.62)
+	rp.position = Vector2(44, 210)
+	rp.size = Vector2(W - 88, 560)
+	rp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rank_box.add_child(rp)
+	rank_title = _mk_label(rank_box, "★ ランキング ★", 232, 38, Color(1, 0.9, 0.4))
+	rank_list = VBoxContainer.new()
+	rank_list.position = Vector2(74, 300)
+	rank_list.size = Vector2(W - 148, 380)
+	rank_list.add_theme_constant_override("separation", 6)
+	rank_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rank_box.add_child(rank_list)
+	_mk_button(rank_box, "リトライ", Vector2(W * 0.5 - 90, 702), Vector2(180, 56), _on_rank_retry)
+	rank_box.visible = false
+
+
+func _name_add(ch: String) -> void:
+	if entry_text.length() >= 10:
+		return
+	entry_text += ch
+	_update_name_display()
+	sfx.play("click", 1.4, -8.0)
+
+
+func _name_del() -> void:
+	if entry_text.is_empty():
+		return
+	entry_text = entry_text.substr(0, entry_text.length() - 1)
+	_update_name_display()
+	sfx.play("click", 0.9, -8.0)
+
+
+func _update_name_display() -> void:
+	name_display.text = entry_text if not entry_text.is_empty() else "［なまえ］"
+
+
+# ---------------------------------------------------------------- レベルアップ
+func _build_levelup() -> void:
+	level_box = Control.new()
+	level_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	level_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(level_box)
+	var bg2 := ColorRect.new()
+	bg2.color = Color(0, 0, 0, 0.5)
+	bg2.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_box.add_child(bg2)
+	_mk_label(level_box, "レベルアップ！", 250, 46, Color(1, 0.9, 0.35))
+	_mk_label(level_box, "1つ選ぶ", 308, 24, Color(1, 1, 1, 0.85))
+	for i in 3:
+		var c := Button.new()
+		c.position = Vector2(60, 360 + i * 130)
+		c.custom_minimum_size = Vector2(W - 120, 116)
+		c.size = Vector2(W - 120, 116)
+		c.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		c.add_theme_font_size_override("font_size", 23)
+		c.pressed.connect(_on_card.bind(i))
+		level_box.add_child(c)
+		level_cards.append(c)
+	level_box.visible = false
+
+
+func _lv(id: String) -> int:
+	return int(ups.get(id, 0))
+
+
+func _recompute_passives() -> void:
+	cur_radius = maxf(11.0, 17.0 - _lv("small") * 1.5)
+	if bird:
+		bird.gravity_mult = 1.0 - _lv("float") * 0.07
+
+
+func _offer_levelup() -> void:
+	if _leveling or state != PLAY or _pv:
+		return
+	# まだ上限に達していない強化を集める
+	var pool: Array = []
+	for d in UP_DEFS:
+		if _lv(d["id"]) < int(d["max"]):
+			pool.append(d)
+	if pool.is_empty():
+		return
+	pool.shuffle()
+	_offered = []
+	for i in mini(3, pool.size()):
+		_offered.append(pool[i])
+	for i in level_cards.size():
+		var c: Button = level_cards[i]
+		if i < _offered.size():
+			var d = _offered[i]
+			c.text = "%s\n%s  (Lv %d/%d)" % [d["name"], d["desc"], _lv(d["id"]), int(d["max"])]
+			c.visible = true
+		else:
+			c.visible = false
+	_leveling = true
+	_pipes_since_level = 0
+	level_box.visible = true
+	sfx.play("powerup", 1.2)
+
+
+func _on_card(i: int) -> void:
+	if not _leveling or i >= _offered.size():
+		return
+	_apply_upgrade(str(_offered[i]["id"]))
+	sfx.play("click")
+	_leveling = false
+	level_box.visible = false
+	_floater("%s!" % str(_offered[i]["name"]), bird.position + Vector2(0, -60), Color(1, 0.9, 0.4), 30)
+
+
+func _apply_upgrade(id: String) -> void:
+	ups[id] = _lv(id) + 1
+	_recompute_passives()
+
+
+func _do_revive() -> void:
+	_revive_used = true
+	bird.velocity = -420.0
+	shield = true
+	bird.shield = true
+	invuln_t = 1.4
+	sfx.play("fever")
+	shake = maxf(shake, 12.0)
+	_burst(bird.position, Color(1, 0.8, 0.3), 30, 300.0, 0.8, 5.0)
+	_floater("ふっかつ！", bird.position + Vector2(0, -60), Color(1, 0.85, 0.3), 40)
+
+
+# ---------------------------------------------------------------- 通信
+func _api_base() -> String:
+	# 同一オリジンの公開URL。eval を避けるため固定(CSPで unsafe-eval を許可しないため)。
+	# 独自ドメインに変えた場合はここを更新。
+	return "https://flappy-fever-54519886771.asia-northeast1.run.app"
+
+
+func _fetch_scores(cb: Callable) -> void:
+	var h := HTTPRequest.new()
+	add_child(h)
+	h.request_completed.connect(func(_r, code, _hd, body):
+		var arr: Array = []
+		if code == 200:
+			var j = JSON.parse_string(body.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY and j.has("scores"):
+				arr = j["scores"]
+		_last_scores = arr
+		h.queue_free()
+		cb.call(arr))
+	var err := h.request(_api_base() + "/api/scores")
+	if err != OK:
+		h.queue_free()
+		cb.call([])
+
+
+func _submit_score(pname: String, sc: int, cb: Callable) -> void:
+	var h := HTTPRequest.new()
+	add_child(h)
+	h.request_completed.connect(func(_r, code, _hd, body):
+		var arr: Array = []
+		if code == 200:
+			var j = JSON.parse_string(body.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY and j.has("scores"):
+				arr = j["scores"]
+		_last_scores = arr
+		h.queue_free()
+		cb.call(arr))
+	var payload := JSON.stringify({"name": pname, "score": sc})
+	var err := h.request(_api_base() + "/api/scores", ["Content-Type: application/json"], HTTPClient.METHOD_POST, payload)
+	if err != OK:
+		h.queue_free()
+		cb.call([])
+
+
+func _qualifies(sc: int, arr: Array) -> bool:
+	if sc <= 0:
+		return false
+	if arr.size() < 10:
+		return true
+	var last = arr[arr.size() - 1]
+	return sc > int(last.get("score", 0))
+
+
+# ---------------------------------------------------------------- 表示
+func _show_name_entry() -> void:
+	_modal = true
+	hud.show_medal = false
+	over_box.visible = false
+	rank_box.visible = false
+	entry_text = ""
+	_update_name_display()
+	name_box.visible = true
+
+
+func _on_register() -> void:
+	if not name_box.visible:
+		return
+	_player_name = entry_text.strip_edges()
+	save_best()
+	sfx.play("click")
+	name_box.visible = false
+	_show_ranking_loading()
+	_submit_score(_player_name, score, func(arr): _render_ranking(arr))
+
+
+func _on_skip() -> void:
+	sfx.play("click")
+	name_box.visible = false
+	_modal = false
+	over_box.visible = true
+
+
+func _open_ranking() -> void:
+	sfx.play("click")
+	_show_ranking_loading()
+	_fetch_scores(func(arr): _render_ranking(arr))
+
+
+func _on_rank_retry() -> void:
+	sfx.play("click")
+	_reset(false)
+
+
+func _show_ranking_loading() -> void:
+	_modal = true
+	hud.show_medal = false
+	over_box.visible = false
+	name_box.visible = false
+	for c in rank_list.get_children():
+		c.queue_free()
+	rank_box.visible = true
+	var l := Label.new()
+	l.text = "読み込み中…"
+	l.add_theme_font_size_override("font_size", 24)
+	l.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+	rank_list.add_child(l)
+
+
+func _render_ranking(arr: Array) -> void:
+	for c in rank_list.get_children():
+		c.queue_free()
+	if arr.is_empty():
+		var l := Label.new()
+		l.text = "まだ記録がありません"
+		l.add_theme_font_size_override("font_size", 22)
+		l.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+		rank_list.add_child(l)
+		return
+	for i in arr.size():
+		var e = arr[i]
+		var nm := str(e.get("name", "ななし"))
+		var sc := int(e.get("score", 0))
+		var row := _rank_row(i + 1, nm, sc, 26)
+		rank_list.add_child(row)
+
+
+func _rank_row(rank: int, nm: String, sc: int, fs: int) -> Label:
+	var l := Label.new()
+	l.text = "%2d.  %-12s  %6d" % [rank, nm, sc]
+	l.add_theme_font_size_override("font_size", fs)
+	var col := Color(1, 1, 1, 0.92)
+	if rank == 1:
+		col = Color(1, 0.85, 0.25)
+	elif rank == 2:
+		col = Color(0.8, 0.85, 0.9)
+	elif rank == 3:
+		col = Color(0.9, 0.6, 0.35)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	l.add_theme_constant_override("outline_size", 4)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+func _refresh_title_rank() -> void:
+	_fetch_scores(func(arr):
+		if title_rank == null:
+			return
+		for c in title_rank.get_children():
+			c.queue_free()
+		if arr.is_empty():
+			var l := Label.new()
+			l.text = "まだ記録なし — 一番乗りをねらえ！"
+			l.add_theme_font_size_override("font_size", 20)
+			l.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			title_rank.add_child(l)
+			return
+		for i in mini(arr.size(), 5):
+			var e = arr[i]
+			title_rank.add_child(_rank_row(i + 1, str(e.get("name", "ななし")), int(e.get("score", 0)), 24)))
 
 
 # ---------------------------------------------------------------- リセット
@@ -181,6 +618,7 @@ func _reset(to_title: bool) -> void:
 	score = 0
 	combo = 0
 	coins_collected = 0
+	pipes_passed = 0
 	scroll_speed = BASE_SPEED
 	fever_gauge = 0.0
 	fever_active = false
@@ -200,11 +638,24 @@ func _reset(to_title: bool) -> void:
 	bird.shield = false
 	bird.magnet = false
 
+	# ローグライク強化をリセット
+	ups.clear()
+	_leveling = false
+	_pipes_since_level = 0
+	_revive_used = false
+	if level_box:
+		level_box.visible = false
+	_recompute_passives()
+
 	score_label.text = "0"
 	score_label.visible = not to_title
 	multi_label.visible = false
 	hud.visible = not to_title
+	hud.show_medal = false  # リスタート時に中央メダルを消す
 	over_box.visible = false
+	name_box.visible = false
+	rank_box.visible = false
+	_modal = false
 
 	if to_title:
 		state = TITLE
@@ -225,10 +676,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			sfx.play("click")
 			_reset(false)
 		PLAY:
+			if _leveling:
+				return  # レベルアップ選択中は羽ばたかない
 			bird.flap()
 			sfx.play("flap", randf_range(0.92, 1.08))
 			_feathers()
 		DEAD:
+			# 名前入力やランキング表示中はタップでリスタートしない
+			if _modal:
+				return
 			if dead_cd <= 0.0:
 				sfx.play("click")
 				_reset(false)
@@ -247,6 +703,8 @@ func _is_flap(event: InputEvent) -> bool:
 # ---------------------------------------------------------------- メインループ
 func _process(delta: float) -> void:
 	delta = minf(delta, 0.05)  # スパイク対策
+	if _pv:
+		_pv_director(delta)
 	_update_shake(delta)
 
 	match state:
@@ -289,7 +747,12 @@ func _update_dead(delta: float) -> void:
 
 
 func _update_play(delta: float) -> void:
+	if _leveling:
+		return  # レベルアップ選択中は世界を止める
+	if _pv:
+		_pv_ai()
 	var speed_mult := (1.12 if fever_active else 1.0) * (0.5 if slowmo_t > 0.0 else 1.0)
+	speed_mult *= 1.0 - _lv("slow") * 0.07  # スロー体質
 	var dx := scroll_speed * delta * speed_mult
 	var pdelta := delta * speed_mult
 
@@ -306,8 +769,8 @@ func _update_play(delta: float) -> void:
 		bird.position.y = Bird.RADIUS
 		bird.velocity = maxf(bird.velocity, 0.0)
 	# 着地=死
-	if bird.position.y > GROUND_Y - Bird.RADIUS:
-		bird.position.y = GROUND_Y - Bird.RADIUS
+	if bird.position.y > GROUND_Y - cur_radius:
+		bird.position.y = GROUND_Y - cur_radius
 		_on_hit(true)
 		return
 
@@ -329,11 +792,20 @@ func _update_play(delta: float) -> void:
 		u.position.x -= dx
 		u.tick(delta)
 
-	# マグネット
+	# マグネット(アイテム中は強力、マグネット体質は常時弱め)
+	var mag_radius := 0.0
+	var mag_speed := 0.0
 	if magnet_t > 0.0:
+		mag_radius = 230.0
+		mag_speed = 620.0
+	var passive := _lv("magnet") * 70.0
+	if passive > mag_radius:
+		mag_radius = passive
+		mag_speed = maxf(mag_speed, 300.0)
+	if mag_radius > 0.0:
 		for c in coins:
-			if c.position.distance_to(bird.position) < 230.0:
-				c.position = c.position.move_toward(bird.position, 620.0 * delta)
+			if c.position.distance_to(bird.position) < mag_radius:
+				c.position = c.position.move_toward(bird.position, mag_speed * delta)
 
 	_check_pipes()
 	if state != PLAY:
@@ -355,8 +827,8 @@ func _update_play(delta: float) -> void:
 		if fever_time <= 0.0:
 			_end_fever()
 
-	# 難易度
-	scroll_speed = BASE_SPEED + minf(score * 3.0, 175.0)
+	# 難易度(通過パイプ数で上昇。フィーバーのスコア倍増では跳ねない)
+	scroll_speed = BASE_SPEED + minf(pipes_passed * 6.0, 170.0)
 
 	score_label.text = str(score)
 	_update_combo_label()
@@ -364,13 +836,21 @@ func _update_play(delta: float) -> void:
 
 # ---------------------------------------------------------------- 生成
 func _spawn_pipe() -> void:
-	var gap := clampf(240.0 - score * 2.2, 165.0, 240.0)
+	var gap := clampf(235.0 - pipes_passed * 2.0, 165.0, 235.0)
 	if fever_active:
 		gap += 30.0  # フィーバー中は少し楽に
+	if _pv:
+		gap = 235.0  # PVは見栄え優先で隙間を一定に
 	var margin := 90.0
 	var lo := gap * 0.5 + margin
 	var hi := GROUND_Y - gap * 0.5 - margin
+	if _pv:
+		# PVは中央寄りに出してAIの上下移動をなめらかに
+		lo = maxf(lo, 330.0)
+		hi = minf(hi, 600.0)
 	var center := randf_range(lo, hi)
+	if _pv and _pv_scene == "fever":
+		center = 700.0  # 隙間を下に寄せ、無敵の鳥が上の土管を貫通する画に
 
 	var p := Pipe.new()
 	p.width = 88.0
@@ -381,8 +861,8 @@ func _spawn_pipe() -> void:
 	p.ground_y = GROUND_Y
 	p.position = Vector2(W + 70, 0)
 
-	# 上下に揺れるパイプ(スコアが上がると登場)
-	if score >= 12 and randf() < 0.33:
+	# 上下に揺れるパイプ(スコアが上がると登場。PVでは安定優先で無効)
+	if not _pv and pipes_passed >= 14 and randf() < 0.33:
 		p.moving = true
 		var room := minf(center - lo, hi - center)
 		p.osc_amp = minf(40.0 + score, 110.0)
@@ -401,10 +881,37 @@ func _spawn_pipe() -> void:
 
 	# ミッドポイントにコイン or パワーアップ
 	var mid_x := W + 70 + SPACING * 0.5
-	if score >= 4 and randf() < 0.16:
+	if _pv:
+		_pv_pipe_n += 1
+		# 保留中のパワーアップを隙間中心に置く(AIが通過時に確実に取る)
+		if _pv_pending_pu >= 0:
+			var u := PowerUp.new()
+			u.kind = _pv_pending_pu
+			u.position = Vector2(W + 70, center)
+			world.add_child(u)
+			powerups.append(u)
+			_pv_pending_pu = -1
+		# シーンごとのコイン量
+		match _pv_scene:
+			"combo":
+				_spawn_coins(mid_x, center, gap)
+				_spawn_coins(mid_x + 95, center, gap)
+			"magnet":
+				_pv_spread_coins(mid_x, center)
+			"fever":
+				pass  # すり抜けを見せたいのでコインは出さない
+			_:
+				if randf() < 0.7:
+					_spawn_coins(mid_x, center, gap)
+		return
+	# パワーアップ(強運で出やすく)
+	if pipes_passed >= 3 and randf() < 0.14 + _lv("luck") * 0.05:
 		_spawn_powerup(mid_x, center)
 	elif randf() < 0.82:
 		_spawn_coins(mid_x, center, gap)
+	# でかコイン(隙間の端にハグして出現 → 取りに行くとリスク)
+	if randf() < 0.11 + _lv("biglover") * 0.06:
+		_spawn_big_coin(center, gap)
 
 
 func _spawn_coins(x: float, center: float, gap: float) -> void:
@@ -413,6 +920,7 @@ func _spawn_coins(x: float, center: float, gap: float) -> void:
 	var cy := center + randf_range(-gap * 0.2, gap * 0.2)
 	for i in n:
 		var c := Coin.new()
+		c.value = 2 + _lv("coin")
 		var t := float(i) - (n - 1) * 0.5
 		var ox := 0.0
 		var oy := 0.0
@@ -430,6 +938,20 @@ func _spawn_coins(x: float, center: float, gap: float) -> void:
 		coins.append(c)
 
 
+func _spawn_big_coin(center: float, gap: float) -> void:
+	# 隙間の上端 or 下端ギリギリに配置(土管に近く、取りに行くと当たるリスク)
+	var c := Coin.new()
+	c.big = true
+	c.value = 18 + _lv("biglover") * 6 + _lv("coin")
+	var r := c.radius()
+	var top_edge := center - gap * 0.5 + r + 6.0
+	var bot_edge := center + gap * 0.5 - r - 6.0
+	var y := top_edge if randf() < 0.5 else bot_edge
+	c.position = Vector2(W + 70, clampf(y, 90.0, GROUND_Y - 90.0))
+	world.add_child(c)
+	coins.append(c)
+
+
 func _spawn_powerup(x: float, center: float) -> void:
 	var u := PowerUp.new()
 	u.kind = randi() % 3
@@ -445,23 +967,29 @@ func _check_pipes() -> void:
 		# スコア(通過)
 		if not p.passed and bird.position.x > p.position.x:
 			p.passed = true
+			pipes_passed += 1
+			_pipes_since_level += 1
 			var pts := 2 if fever_active else 1
 			score += pts
 			_add_fever(0.08)
 			sfx.play("score", 1.0 + minf(score, 25) * 0.008)
 			_floater("+%d" % pts, Vector2(p.position.x, p.gap_top() + p.gap * 0.5), Color.WHITE, 26)
-			# ニアミス
+			# ニアミス(達人で判定とボーナスUP)
+			var near_win := 30.0 + _lv("near") * 8.0
 			var near: float = min(absf(bird.position.y - p.gap_top()), absf(bird.position.y - p.gap_bottom()))
-			if near < 30.0 and bird.alive:
-				var nb := 4 if fever_active else 2
+			if near < near_win and bird.alive:
+				var nb := (2 + _lv("near")) * (2 if fever_active else 1)
 				score += nb
 				_add_fever(0.07)
 				shake = maxf(shake, 5.0)
 				sfx.play("nice")
-				_floater("NICE! +%d" % nb, bird.position + Vector2(0, -40), Color(0.5, 1, 0.6), 30)
+				_floater("ナイス！ +%d" % nb, bird.position + Vector2(0, -40), Color(0.5, 1, 0.6), 30)
+			# フィーバーが長く出ないとき用の保険(15本でレベルアップ)
+			if not fever_active and _pipes_since_level >= 15:
+				_offer_levelup()
 		# 衝突
 		if not invincible:
-			if _circle_rect(bird.position, Bird.RADIUS, p.top_rect()) or _circle_rect(bird.position, Bird.RADIUS, p.bottom_rect()):
+			if _circle_rect(bird.position, cur_radius, p.top_rect()) or _circle_rect(bird.position, cur_radius, p.bottom_rect()):
 				_on_hit(false)
 				return
 
@@ -471,7 +999,7 @@ func _check_pickups() -> void:
 	for c in coins.duplicate():
 		if c.collected:
 			continue
-		if bird.position.distance_to(c.position) < Bird.RADIUS + Coin.RADIUS:
+		if bird.position.distance_to(c.position) < Bird.RADIUS + c.radius():
 			_collect_coin(c)
 	for u in powerups.duplicate():
 		if u.collected:
@@ -491,16 +1019,20 @@ func _collect_coin(c: Coin) -> void:
 	c.collected = true
 	combo += 1
 	coins_collected += 1
-	var mult := minf(1.0 + combo * 0.15, 8.0)
+	var mult := minf(1.0 + combo * (0.15 + _lv("combo") * 0.06), 8.0)
 	var fmult := 2 if fever_active else 1
-	var val := int(round(2.0 * mult)) * fmult
+	var val := int(round(float(c.value) * mult)) * fmult
 	score += val
-	_add_fever(0.05)
-	sfx.play("coin", 1.0 + minf(combo, 14) * 0.04)
-	_burst(c.position, Color(1, 0.85, 0.3), 10, 160.0, 0.5, 3.0)
-	_floater("+%d" % val, c.position, Color(1, 0.9, 0.4), 24, 50.0)
+	_add_fever(0.10 if c.big else 0.05)
+	var pitch := 0.8 if c.big else 1.0 + minf(combo, 14) * 0.04
+	sfx.play("coin", pitch)
+	var fs := 34 if c.big else 24
+	_burst(c.position, Color(1, 0.85, 0.3), 18 if c.big else 10, 200.0 if c.big else 160.0, 0.6, 4.0 if c.big else 3.0)
+	_floater("+%d" % val, c.position, Color(1, 0.9, 0.4), fs, 60.0 if c.big else 50.0)
+	if c.big:
+		shake = maxf(shake, 8.0)
 	if combo % 10 == 0:
-		_floater("COMBO x%d!" % combo, bird.position + Vector2(0, -70), Color(1, 0.6, 0.2), 36)
+		_floater("コンボ x%d！" % combo, bird.position + Vector2(0, -70), Color(1, 0.6, 0.2), 36)
 		shake = maxf(shake, 6.0)
 	coins.erase(c)
 	c.queue_free()
@@ -515,14 +1047,14 @@ func _collect_powerup(u: PowerUp) -> void:
 		PowerUp.SHIELD:
 			shield = true
 			bird.shield = true
-			_floater("SHIELD!", bird.position + Vector2(0, -60), Color(0.5, 0.8, 1), 34)
+			_floater("シールド！", bird.position + Vector2(0, -60), Color(0.5, 0.8, 1), 34)
 		PowerUp.SLOWMO:
 			slowmo_t = 4.0
-			_floater("SLOW-MO!", bird.position + Vector2(0, -60), Color(0.8, 0.6, 1), 34)
+			_floater("スローモー！", bird.position + Vector2(0, -60), Color(0.8, 0.6, 1), 34)
 		PowerUp.MAGNET:
 			magnet_t = 6.0
 			bird.magnet = true
-			_floater("MAGNET!", bird.position + Vector2(0, -60), Color(0.4, 0.95, 0.85), 34)
+			_floater("マグネット！", bird.position + Vector2(0, -60), Color(0.4, 0.95, 0.85), 34)
 	powerups.erase(u)
 	u.queue_free()
 
@@ -531,26 +1063,32 @@ func _collect_powerup(u: PowerUp) -> void:
 func _add_fever(a: float) -> void:
 	if fever_active:
 		return
-	fever_gauge += a
+	fever_gauge += a * (1.0 + _lv("fevergain") * 0.25)  # フィーバー体質
 	if fever_gauge >= 1.0:
 		_start_fever()
 
 
+func _fever_dur() -> float:
+	return FEVER_DUR + _lv("feverdur")  # フィーバー長持ち
+
+
 func _start_fever() -> void:
 	fever_active = true
-	fever_time = FEVER_DUR
+	fever_time = _fever_dur()
 	fever_gauge = 1.0
 	bird.fever = true
 	sfx.play("fever")
 	shake = maxf(shake, 14.0)
 	_burst(bird.position, Color(1, 0.7, 0.2), 40, 320.0, 0.8, 5.0)
-	_floater("FEVER TIME!", Vector2(W * 0.5, H * 0.42), Color(1, 0.85, 0.2), 44)
+	_floater("フィーバー！！", Vector2(W * 0.5, H * 0.42), Color(1, 0.85, 0.2), 44)
 
 
 func _end_fever() -> void:
 	fever_active = false
 	bird.fever = false
 	fever_gauge = 0.0
+	# フィーバー終了でレベルアップ抽選(本作のローグライク強化の起点)
+	_offer_levelup()
 
 
 # ---------------------------------------------------------------- 被弾・死亡
@@ -571,13 +1109,17 @@ func _on_hit(is_ground: bool) -> void:
 		sfx.play("shield")
 		shake = maxf(shake, 10.0)
 		_burst(bird.position, Color(0.5, 0.8, 1.0), 22, 240.0, 0.6, 4.0)
-		_floater("SAVED!", bird.position + Vector2(0, -50), Color(0.6, 0.9, 1), 32)
+		_floater("ガード！", bird.position + Vector2(0, -50), Color(0.6, 0.9, 1), 32)
 		return
 	_die()
 
 
 func _die() -> void:
 	if state == DEAD:
+		return
+	# 不死鳥:1ラン1回だけ復活(PV中は無効)
+	if not _pv and _lv("revive") > 0 and not _revive_used:
+		_do_revive()
 		return
 	state = DEAD
 	bird.alive = false
@@ -597,15 +1139,22 @@ func _die() -> void:
 		save_best()
 
 	multi_label.visible = false
-	over_score.text = "SCORE  %d" % score
-	over_best.text = "BEST  %d" % best
+	over_score.text = "スコア  %d" % score
+	over_best.text = "ベスト  %d" % best
 	over_new.visible = new_best
 	var m := _medal(score)
-	over_medal.text = ["", "BRONZE", "SILVER", "GOLD", "PLATINUM"][m]
+	over_medal.text = ["", "ブロンズメダル", "シルバーメダル", "ゴールドメダル", "プラチナメダル"][m]
 	over_medal.add_theme_color_override("font_color", Hud.MEDAL_COLS[m])
 	hud.medal = m
 	hud.show_medal = m > 0
 	over_box.visible = true
+
+	# ランキング:トップ10入りなら名前入力へ(PV中は無効)
+	if not _pv:
+		var sc := score
+		_fetch_scores(func(arr):
+			if state == DEAD and not _modal and _qualifies(sc, arr):
+				_show_name_entry())
 
 
 func _medal(s: int) -> int:
@@ -648,7 +1197,7 @@ func _update_hud() -> void:
 	hud.fever = fever_gauge
 	hud.fever_active = fever_active
 	hud.fever_time = fever_time
-	hud.fever_max = FEVER_DUR
+	hud.fever_max = _fever_dur()
 	hud.shield = shield
 	hud.slowmo_t = slowmo_t
 	hud.magnet_t = magnet_t
@@ -656,12 +1205,12 @@ func _update_hud() -> void:
 
 func _update_combo_label() -> void:
 	if fever_active:
-		multi_label.text = "FEVER  x2   (combo %d)" % combo
+		multi_label.text = "フィーバー  x2   (コンボ %d)" % combo
 		multi_label.add_theme_color_override("font_color", Color(1, 0.6, 0.2))
 		multi_label.visible = true
 	elif combo > 1:
 		var mult := minf(1.0 + combo * 0.15, 8.0)
-		multi_label.text = "COMBO %d   x%.1f" % [combo, mult]
+		multi_label.text = "コンボ %d   x%.1f" % [combo, mult]
 		multi_label.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
 		multi_label.visible = true
 	else:
@@ -705,9 +1254,211 @@ func load_best() -> void:
 		var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
 		if f:
 			best = int(f.get_line())
+			if not f.eof_reached():
+				_player_name = f.get_line().strip_edges()
 
 
 func save_best() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_line(str(best))
+		f.store_line(_player_name)
+
+
+# ================================================================ PV(Direct風デモ)
+var _pv_wipe: PvWipe
+
+func _pv_setup() -> void:
+	_pv = true
+	_pv_layer = CanvasLayer.new()
+	_pv_layer.layer = 20
+	add_child(_pv_layer)
+
+	# シネスコの黒帯(最初は画面外)
+	_pv_bar_top = ColorRect.new()
+	_pv_bar_top.color = Color(0, 0, 0, 1)
+	_pv_bar_top.position = Vector2(0, -90)
+	_pv_bar_top.size = Vector2(W, 90)
+	_pv_layer.add_child(_pv_bar_top)
+	_pv_bar_bot = ColorRect.new()
+	_pv_bar_bot.color = Color(0, 0, 0, 1)
+	_pv_bar_bot.position = Vector2(0, H)
+	_pv_bar_bot.size = Vector2(W, 90)
+	_pv_layer.add_child(_pv_bar_bot)
+
+	# 暗転オーバーレイ(最初は真っ黒からスタート)
+	_pv_fade = ColorRect.new()
+	_pv_fade.color = Color(0.03, 0.04, 0.08, 1)
+	_pv_fade.position = Vector2.ZERO
+	_pv_fade.size = Vector2(W, H)
+	_pv_layer.add_child(_pv_fade)
+
+	# 実況ワイプ(最初は画面右外)
+	_pv_wipe = PvWipe.new()
+	_pv_wipe.position = Vector2(W + 20, 700)
+	_pv_wipe.visible = false
+	_pv_layer.add_child(_pv_wipe)
+
+	_reset(false)        # 自動プレイ開始(黒幕の裏で動かしておく)
+	_pv_title_card()
+
+
+func _pv_title_card() -> void:
+	_pv_title = Control.new()
+	_pv_title.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pv_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pv_layer.add_child(_pv_title)
+	_mk_label(_pv_title, "FLAPPY", 320, 78, Color(1, 0.85, 0.25))
+	_mk_label(_pv_title, "FEVER", 404, 96, Color(1, 0.45, 0.35))
+	_mk_label(_pv_title, "いちばんアツいフラッピー、爆誕。", 552, 26, Color(1, 1, 1, 0.92))
+	_pv_title.pivot_offset = Vector2(W * 0.5, H * 0.5)
+	_pv_title.scale = Vector2(0.82, 0.82)
+	create_tween().tween_property(_pv_title, "scale", Vector2.ONE, 0.7) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _pv_director(delta: float) -> void:
+	_pv_t += delta
+	# 字幕
+	if _pv_cap_idx < PV_CAPS.size() and _pv_t >= float(PV_CAPS[_pv_cap_idx][0]):
+		_pv_caption(str(PV_CAPS[_pv_cap_idx][1]))
+		_pv_cap_idx += 1
+	# シーン遷移
+	if _pv_scene_idx < PV_SCENES.size() and _pv_t >= float(PV_SCENES[_pv_scene_idx][0]):
+		_pv_enter_scene(str(PV_SCENES[_pv_scene_idx][1]))
+		_pv_scene_idx += 1
+
+
+func _pv_enter_scene(scene_name: String) -> void:
+	_pv_scene = scene_name
+	if _pv_wipe:
+		_pv_wipe.hype = 0.2
+	match scene_name:
+		"basic":
+			_pv_reveal()
+		"shield":
+			_pv_pending_pu = PowerUp.SHIELD
+		"slowmo":
+			_pv_pending_pu = PowerUp.SLOWMO
+		"magnet":
+			_pv_pending_pu = PowerUp.MAGNET
+		"fever":
+			if _pv_wipe:
+				_pv_wipe.hype = 1.0
+			if state == PLAY and not fever_active:
+				_start_fever()
+			fever_time = 8.5  # シーンの間ずっと無敵を維持
+		"medal":
+			if _pv_wipe:
+				_pv_wipe.hype = 0.7
+			if fever_active:
+				_end_fever()
+			if state == PLAY and not _pv_dead_done:
+				_pv_dead_done = true
+				_die()
+		"end":
+			_pv_end_card()
+
+
+func _pv_reveal() -> void:
+	var tw := create_tween()
+	tw.tween_property(_pv_fade, "modulate:a", 0.0, 0.8)
+	tw.parallel().tween_property(_pv_bar_top, "position:y", 0.0, 0.6) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(_pv_bar_bot, "position:y", H - 90.0, 0.6) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(_pv_title, "modulate:a", 0.0, 0.5)
+	if _pv_wipe:
+		_pv_wipe.visible = true
+		tw.parallel().tween_property(_pv_wipe, "position:x", W - PvWipe.PW - 14.0, 0.6) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _pv_ai() -> void:
+	# フィーバー中は上のラインを保ち、上の土管を貫通する画に
+	if _pv_scene == "fever":
+		if bird.position.y > 400.0 and bird.velocity > -120.0:
+			bird.flap()
+		return
+	# 近いパイプの隙間中心を狙う
+	var np: Pipe = null
+	var nx := 1.0e9
+	for p in pipes:
+		if p.position.x + p.width * 0.5 > bird.position.x and p.position.x < nx:
+			nx = p.position.x
+			np = p
+	var target := 430.0
+	if np:
+		target = np.center
+	# シールド入手後はわざと上の土管へ突っ込み、ガードを見せる
+	if _pv_scene == "shield" and shield and np:
+		target = np.gap_top() - 35.0
+	if bird.position.y > target and bird.velocity > -120.0:
+		bird.flap()
+
+
+func _pv_spread_coins(x: float, center: float) -> void:
+	# マグネットの実演用に縦へ広くコインを撒く
+	for i in 7:
+		var c := Coin.new()
+		var oy := (float(i) - 3.0) * 58.0
+		c.position = Vector2(x + float(i % 2) * 40.0, clampf(center + oy, 130.0, GROUND_Y - 130.0))
+		world.add_child(c)
+		coins.append(c)
+
+
+func _pv_caption(text: String) -> void:
+	var y := 760.0
+	var bar := ColorRect.new()
+	bar.color = Color(0, 0, 0, 0.0)
+	bar.position = Vector2(20, y - 6)
+	bar.size = Vector2(W - 40, 84)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pv_layer.add_child(bar)
+
+	var l := Label.new()
+	l.text = text
+	l.position = Vector2(20, y)
+	l.size = Vector2(W - 40, 72)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 28)
+	l.add_theme_color_override("font_color", Color(1, 1, 1))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	l.add_theme_constant_override("outline_size", 9)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.modulate.a = 0.0
+	_pv_layer.add_child(l)
+
+	var tw := create_tween()
+	tw.tween_property(bar, "color:a", 0.45, 0.35)
+	tw.parallel().tween_property(l, "modulate:a", 1.0, 0.35)
+	tw.tween_interval(3.6)
+	tw.tween_property(bar, "color:a", 0.0, 0.5)
+	tw.parallel().tween_property(l, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(bar.queue_free)
+	tw.parallel().tween_callback(l.queue_free)
+
+
+func _pv_end_card() -> void:
+	if _pv_wipe:
+		_pv_wipe.visible = false
+	create_tween().tween_property(_pv_fade, "modulate:a", 0.94, 0.7)
+	var card := Control.new()
+	card.set_anchors_preset(Control.PRESET_FULL_RECT)
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pv_layer.add_child(card)
+	_mk_label(card, "FLAPPY", 290, 74, Color(1, 0.85, 0.25))
+	_mk_label(card, "FEVER", 368, 94, Color(1, 0.45, 0.35))
+	_mk_label(card, "やればやるほどクセになる。", 506, 27, Color(1, 1, 1, 0.95))
+	_mk_label(card, "さあ、君は何点とれる？", 548, 27, Color(1, 0.9, 0.5))
+	_mk_label(card, "Made with Godot 4", 600, 20, Color(1, 1, 1, 0.5))
+	card.pivot_offset = Vector2(W * 0.5, H * 0.5)
+	card.scale = Vector2(0.9, 0.9)
+	card.modulate.a = 0.0
+	var tw := create_tween()
+	tw.tween_interval(0.5)
+	tw.tween_property(card, "modulate:a", 1.0, 0.7)
+	tw.parallel().tween_property(card, "scale", Vector2.ONE, 0.8) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

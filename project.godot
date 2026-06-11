@@ -1,14 +1,23 @@
 ; Engine configuration file.
-; Flappy Fever — Godot 4 project
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
+
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="Flappy Fever"
 config/description="攻めるほど気持ちいい、フィーバー型フラッピーバード"
 run/main_scene="res://Main.tscn"
-config/features=PackedStringArray("4.2", "Forward Plus")
+config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
 [display]
@@ -16,15 +25,12 @@ config/icon="res://icon.svg"
 window/size/viewport_width=540
 window/size/viewport_height=960
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
 window/handheld/orientation=1
 
-[input_devices]
+[gui]
 
-pointing/emulate_mouse_from_touch=true
+theme/custom_font="res://fonts/MochiyPopOne-Regular.ttf"
 
 [rendering]
 
-renderer/rendering_method="forward_plus"
 environment/defaults/default_clear_color=Color(0.13, 0.16, 0.24, 1)
-textures/canvas_textures/default_texture_filter=1

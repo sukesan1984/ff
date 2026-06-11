@@ -9,6 +9,7 @@ const RADIUS := 17.0  # 当たり判定半径
 
 var velocity := 0.0
 var alive := true
+var gravity_mult := 1.0   # ローグライク強化(低重力)用
 var angle := 0.0          # 表示用の傾き(rad)
 var wing := 0.0           # 羽ばたき位相
 var _flap_kick := 0.0     # 羽ばたき直後の強調

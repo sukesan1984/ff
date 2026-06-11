@@ -1,0 +1,6 @@
+# コンテナに必要なのは backend(Goソース)と build/web(Web書き出し)のみ
+*
+!backend
+!backend/**
+!build/web
+!build/web/**

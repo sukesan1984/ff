@@ -2,7 +2,6 @@
 .godot/
 .import/
 export.cfg
-export_presets.cfg
 *.translation
 
 # 自動生成インポート
@@ -12,3 +11,8 @@ export_presets.cfg
 .venv-lint/
 __pycache__/
 *.pyc
+
+# 生成物
+*.avi
+# Web書き出し成果物(godotで再生成)
+build/
