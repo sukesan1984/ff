@@ -54,6 +54,9 @@ var cur_radius := 17.0
 var level_box: Control
 var level_cards: Array = []    # 3枚のカードButton
 var _offered: Array = []       # 今提示中の定義
+var _level_lock := false       # 出現直後の誤タップ防止
+var _selected_card := -1       # 2タップ確定式の選択中インデックス
+var level_hint: Label
 
 const UP_DEFS := [
 	{"id": "small", "name": "ちいさくなる", "desc": "当たり判定が小さくなる", "short": "小", "max": 4},
@@ -118,14 +121,24 @@ var _hitstop := 0.0
 var flash_rect: ColorRect
 var current_biome := -1
 var tint_rect: ColorRect
+var _biome_grav := 1.0
+var _biome_spd := 1.0
+var _biome_gap := 0.0
+var _biome_saw := 1.0
 
 const BIOME_LEN := 10
+# grav=重力倍率, spd=速度倍率, gapadd=隙間補正, sawmul=ノコ出現倍率, hint=突入時の一言
 const BIOMES := [
-	{"name": "草原", "pb": Color(0.32, 0.78, 0.34), "pc": Color(0.24, 0.64, 0.27), "tint": Color(0, 0, 0, 0)},
-	{"name": "夕焼けの丘", "pb": Color(0.88, 0.52, 0.3), "pc": Color(0.72, 0.4, 0.24), "tint": Color(1.0, 0.5, 0.15, 0.16)},
-	{"name": "星空のかなた", "pb": Color(0.34, 0.42, 0.72), "pc": Color(0.24, 0.3, 0.56), "tint": Color(0.1, 0.12, 0.4, 0.24)},
-	{"name": "洞窟", "pb": Color(0.52, 0.46, 0.4), "pc": Color(0.4, 0.35, 0.3), "tint": Color(0.22, 0.13, 0.05, 0.30)},
-	{"name": "天空都市", "pb": Color(0.92, 0.96, 1.0), "pc": Color(0.72, 0.82, 0.96), "tint": Color(0.7, 0.85, 1.0, 0.13)},
+	{"name": "草原", "pb": Color(0.32, 0.78, 0.34), "pc": Color(0.24, 0.64, 0.27), "tint": Color(0, 0, 0, 0),
+		"grav": 1.0, "spd": 1.0, "gapadd": 0.0, "sawmul": 1.0, "hint": ""},
+	{"name": "夕焼けの丘", "pb": Color(0.88, 0.52, 0.3), "pc": Color(0.72, 0.4, 0.24), "tint": Color(1.0, 0.5, 0.15, 0.16),
+		"grav": 1.0, "spd": 1.08, "gapadd": 8.0, "sawmul": 1.0, "hint": "風が少し速い"},
+	{"name": "星空のかなた", "pb": Color(0.34, 0.42, 0.72), "pc": Color(0.24, 0.3, 0.56), "tint": Color(0.1, 0.12, 0.4, 0.26),
+		"grav": 0.68, "spd": 0.95, "gapadd": 0.0, "sawmul": 1.0, "hint": "重力が軽い！"},
+	{"name": "洞窟", "pb": Color(0.52, 0.46, 0.4), "pc": Color(0.4, 0.35, 0.3), "tint": Color(0.22, 0.13, 0.05, 0.34),
+		"grav": 1.06, "spd": 0.95, "gapadd": -24.0, "sawmul": 1.7, "hint": "狭い！ノコギリ多発"},
+	{"name": "天空都市", "pb": Color(0.92, 0.96, 1.0), "pc": Color(0.72, 0.82, 0.96), "tint": Color(0.7, 0.85, 1.0, 0.13),
+		"grav": 1.0, "spd": 1.2, "gapadd": 14.0, "sawmul": 0.7, "hint": "超スピード！"},
 ]
 
 # ===== PV(ニンテンドーダイレクト風デモ録画)用。FF_PV環境変数で有効化 =====
@@ -252,10 +265,17 @@ func _enter_biome(idx: int) -> void:
 	var first := current_biome == -1
 	current_biome = idx
 	var b = BIOMES[idx]
+	_biome_grav = float(b["grav"])
+	_biome_spd = float(b["spd"])
+	_biome_gap = float(b["gapadd"])
+	_biome_saw = float(b["sawmul"])
+	_recompute_passives()  # 重力に反映
 	if tint_rect:
 		create_tween().tween_property(tint_rect, "color", b["tint"], 1.0)
 	if not first:
 		_floater("〜 %s 〜" % str(b["name"]), Vector2(W * 0.5, H * 0.30), Color(1, 1, 1), 42)
+		if str(b["hint"]) != "":
+			_floater(str(b["hint"]), Vector2(W * 0.5, H * 0.37), Color(1, 0.95, 0.6), 24)
 		sfx.play("score", 1.3)
 
 
@@ -476,6 +496,7 @@ func _build_levelup() -> void:
 		ds.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		card.add_child(ds)
 		level_cards.append({"btn": card, "sb": sb, "icon": icon, "name": nm, "desc": ds})
+	level_hint = _mk_label(level_box, "", 742, 22, Color(1, 1, 1, 0.85))
 	level_box.visible = false
 
 
@@ -486,7 +507,7 @@ func _lv(id: String) -> int:
 func _recompute_passives() -> void:
 	cur_radius = maxf(11.0, 17.0 - _lv("small") * 1.5)
 	if bird:
-		bird.gravity_mult = 1.0 - _lv("float") * 0.07
+		bird.gravity_mult = (1.0 - _lv("float") * 0.07) * _biome_grav
 		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0
 	_evo_gold = _lv("evo_gold") > 0
 	_evo_phoenix = _lv("evo_phoenix") > 0
@@ -548,16 +569,53 @@ func _offer_levelup() -> void:
 			btn.visible = false
 	_leveling = true
 	_pipes_since_level = 0
+	_selected_card = -1
+	if level_hint:
+		level_hint.text = "カードをタップ"
 	level_box.visible = true
 	sfx.play("powerup", 1.2)
+	# 出現直後は誤タップ防止でロック(暗→明で合図)
+	_level_lock = true
+	for cd in level_cards:
+		var b: Button = cd["btn"]
+		b.disabled = true
+		b.modulate = Color(1, 1, 1, 0.35)
+	var tw := create_tween()
+	tw.tween_interval(0.38)
+	tw.tween_callback(_unlock_cards)
+
+
+func _unlock_cards() -> void:
+	_level_lock = false
+	for cd in level_cards:
+		var b: Button = cd["btn"]
+		if b.visible:
+			b.disabled = false
+		create_tween().tween_property(b, "modulate:a", 1.0, 0.15)
 
 
 func _on_card(i: int) -> void:
-	if not _leveling or i >= _offered.size():
+	if _level_lock or not _leveling or i >= _offered.size():
 		return
+	if _selected_card != i:
+		# 1タップ目:選択(誤爆防止。緑枠＋他カードを暗く)
+		_selected_card = i
+		sfx.play("click", 1.2)
+		for j in level_cards.size():
+			var b: Button = level_cards[j]["btn"]
+			if j == i:
+				b.modulate = Color(1, 1, 1, 1)
+				level_cards[j]["sb"].border_color = Color(0.45, 1.0, 0.55)
+			elif b.visible:
+				b.modulate = Color(1, 1, 1, 0.4)
+		if level_hint:
+			level_hint.text = "▶ もう一度タップで決定！"
+		return
+	# 2タップ目:確定
 	_apply_upgrade(str(_offered[i]["id"]))
-	sfx.play("click")
+	sfx.play("powerup")
 	_leveling = false
+	_selected_card = -1
 	level_box.visible = false
 	_floater("%s!" % str(_offered[i]["name"]), bird.position + Vector2(0, -60), Color(1, 0.9, 0.4), 32)
 
@@ -784,6 +842,10 @@ func _reset(to_title: bool) -> void:
 	if flash_rect:
 		flash_rect.color = Color(1, 1, 1, 0)
 	current_biome = -1
+	_biome_grav = 1.0
+	_biome_spd = 1.0
+	_biome_gap = 0.0
+	_biome_saw = 1.0
 	if tint_rect:
 		tint_rect.color = Color(0, 0, 0, 0)
 	spawn_countdown = 200.0
@@ -884,7 +946,8 @@ func _process(delta: float) -> void:
 
 	if _auto:  # 開発用オートプレイ
 		if _leveling:
-			_on_card(randi() % 3)
+			_on_card(0)  # 1タップ目:選択
+			_on_card(0)  # 2タップ目:確定
 		elif state == DEAD and dead_cd <= 0.0:
 			_reset(false)
 
@@ -938,6 +1001,7 @@ func _update_play(delta: float) -> void:
 		_pv_ai()
 	var speed_mult := (1.12 if fever_active else 1.0) * (0.5 if slowmo_t > 0.0 else 1.0)
 	speed_mult *= 1.0 - _lv("slow") * 0.07  # スロー体質
+	speed_mult *= _biome_spd  # バイオームのスピード個性
 	var dx := scroll_speed * delta * speed_mult
 	var pdelta := delta * speed_mult
 
@@ -1043,10 +1107,13 @@ func _spawn_pipe() -> void:
 	var gap := clampf(235.0 - pipes_passed * 2.0, 165.0, 235.0)
 	if fever_active:
 		gap += 30.0  # フィーバー中は少し楽に
+	if not _pv:
+		gap += _biome_gap  # バイオームの隙間個性
 	if _pv:
 		gap = 235.0  # PVは見栄え優先で隙間を一定に
+	gap = clampf(gap, 150.0, 320.0)
 	# ノコギリ付きパイプ(進んでから登場)。隙間は広めにして公平に
-	var has_saw := not _pv and pipes_passed >= 16 and randf() < 0.16 + minf(pipes_passed * 0.003, 0.16)
+	var has_saw := not _pv and pipes_passed >= 16 and randf() < (0.16 + minf(pipes_passed * 0.003, 0.16)) * _biome_saw
 	if has_saw:
 		gap += 80.0
 	var margin := 90.0
