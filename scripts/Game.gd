@@ -153,6 +153,7 @@ var coins: Array[Coin] = []
 var powerups: Array[PowerUp] = []
 var saws: Array[Saw] = []
 var satellites: Array[Satellite] = []
+var goblins: Array[Goblin] = []
 var spawn_countdown := 200.0
 
 # スコア類
@@ -1163,6 +1164,9 @@ func _reset(to_title: bool) -> void:
 	for s in satellites:
 		s.queue_free()
 	satellites.clear()
+	for g in goblins:
+		g.queue_free()
+	goblins.clear()
 	if level_box:
 		level_box.visible = false
 	_recompute_passives()
@@ -1351,6 +1355,9 @@ func _update_play(delta: float) -> void:
 	# サテライト子機:周回＋コイン回収＋ノコギリ破壊
 	if not satellites.is_empty():
 		_update_satellites(delta)
+	# トレジャーゴブリン
+	if not goblins.is_empty():
+		_update_goblins(delta, dx)
 
 	# マグネット(アイテム中は強力、マグネット体質は常時弱め)
 	var mag_radius := 0.0
@@ -1505,6 +1512,9 @@ func _spawn_pipe() -> void:
 	# お宝(あえて危険な位置に。高額＆ゲージ大でレベルアップを誘う)
 	if pipes_passed >= 6 and randf() < 0.10 + _lv("biglover") * 0.04:
 		_spawn_treasure(center, gap)
+	# トレジャーゴブリン(稀。金袋を抱えて逃げる)
+	if goblins.is_empty() and pipes_passed >= 10 and randf() < 0.05:
+		_spawn_goblin()
 
 
 func _spawn_coins(x: float, center: float, gap: float) -> void:
@@ -1664,6 +1674,50 @@ func _destroy_saw(s: Saw) -> void:
 	sfx.play("hit", 1.4)
 	shake = maxf(shake, 6.0)
 	s.queue_free()
+
+
+func _update_goblins(delta: float, dx: float) -> void:
+	for g in goblins.duplicate():
+		g.position.x -= dx * 0.92  # 少しゆっくり=画面に長居して誘う
+		g.tick(delta)
+		# コインを撒いて誘う
+		if g.drop_t <= 0.0:
+			g.drop_t = 0.34
+			var c := Coin.new()
+			c.value = 2 + _lv("coin")
+			c.position = g.position + Vector2(-6, 8)
+			world.add_child(c)
+			coins.append(c)
+		# 捕獲(報酬は常に有効)
+		if bird.position.distance_to(g.position) < cur_radius + Goblin.RADIUS:
+			_catch_goblin(g)
+		elif g.position.x < -70.0:
+			goblins.erase(g)
+			g.queue_free()
+
+
+func _catch_goblin(g: Goblin) -> void:
+	goblins.erase(g)
+	var reward := (80 + pipes_passed + _lv("biglover") * 15) * (2 if _u_glass else 1)
+	score += reward
+	_add_fever(0.4)
+	sfx.play("powerup")
+	sfx.play("coin", 1.3)
+	_hit_stop(0.08)
+	_flash(Color(1, 0.85, 0.3), 0.4)
+	shake = maxf(shake, 12.0)
+	_burst(g.position, Color(1, 0.85, 0.3), 32, 300.0, 0.8, 4.5)
+	_floater("ゴブリン捕獲！ +%d" % reward, g.position + Vector2(0, -52), Color(1, 0.85, 0.3), 34)
+	g.queue_free()
+
+
+func _spawn_goblin() -> void:
+	var g := Goblin.new()
+	g.base_y = randf_range(220.0, GROUND_Y - 220.0)
+	g.position = Vector2(W + 60, g.base_y)
+	g.drop_t = 0.3
+	world.add_child(g)
+	goblins.append(g)
 
 
 func _update_satellites(delta: float) -> void:
