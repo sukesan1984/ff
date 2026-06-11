@@ -32,6 +32,22 @@ var over_best: Label
 var over_medal: Label
 var over_new: Label
 
+# メタ進行(魂の祭壇)
+var souls := 0
+var meta := {}                 # id -> 永続強化レベル
+var meta_box: Control
+var _meta_open := false
+var meta_souls_label: Label
+var meta_rows: Array = []      # [{def, lvl_label, buy_btn}]
+
+const META_DEFS := [
+	{"id": "m_coin", "name": "豊穣の祝福", "desc": "開始時コイン価値+1", "max": 3, "costs": [40, 100, 220]},
+	{"id": "m_small", "name": "小柄の祝福", "desc": "開始時 当たり判定が小さい", "max": 2, "costs": [60, 160]},
+	{"id": "m_shield", "name": "守護の祝福", "desc": "開始時シールド1枚", "max": 1, "costs": [90]},
+	{"id": "m_luck", "name": "幸運の祝福", "desc": "レア/ユニークが出やすい", "max": 3, "costs": [80, 180, 360]},
+	{"id": "m_soul", "name": "強欲な魂", "desc": "獲得ソウル+25%", "max": 3, "costs": [50, 130, 260]},
+]
+
 # ランキング(リーダーボード)
 var name_box: Control
 var name_display: Label   # 画面内キーボードで入力中の名前表示
@@ -238,6 +254,9 @@ func _ready() -> void:
 	elif OS.has_environment("FF_AUTO"):  # 開発用オートプレイ(観察/録画用。本番では未使用)
 		_auto = true
 		_reset(false)
+	elif OS.has_environment("FF_META"):  # 開発用:祭壇プレビュー
+		souls = 500
+		_open_meta()
 	else:
 		_refresh_title_rank()
 
@@ -291,6 +310,7 @@ func _build() -> void:
 	_build_leaderboard()
 	_build_levelup()
 	_build_help()
+	_build_meta()
 
 	# HUDは最後に追加して最前面に(メダルがパネルに隠れないように)
 	hud = Hud.new()
@@ -372,7 +392,8 @@ func _build_title() -> void:
 	title_rank.add_theme_constant_override("separation", 4)
 	title_rank.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_box.add_child(title_rank)
-	_mk_button(title_box, "あそびかた", Vector2(W * 0.5 - 90, 868), Vector2(180, 50), _open_help)
+	_mk_button(title_box, "魂の祭壇", Vector2(W * 0.5 - 188, 868), Vector2(180, 50), _open_meta)
+	_mk_button(title_box, "あそびかた", Vector2(W * 0.5 + 8, 868), Vector2(180, 50), _open_help)
 	# 点滅
 	var tw := create_tween().set_loops()
 	tw.tween_property(tap, "modulate:a", 0.25, 0.6).set_trans(Tween.TRANS_SINE)
@@ -424,6 +445,84 @@ func _close_help() -> void:
 	sfx.play("click")
 	_help_open = false
 	help_box.visible = false
+
+
+func _build_meta() -> void:
+	meta_box = Control.new()
+	meta_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	meta_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(meta_box)
+	var p := ColorRect.new()
+	p.color = Color(0.06, 0.05, 0.12, 0.97)
+	p.position = Vector2(24, 80)
+	p.size = Vector2(W - 48, 800)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meta_box.add_child(p)
+	_mk_label(meta_box, "★ 魂の祭壇 ★", 100, 38, Color(0.7, 0.55, 1.0))
+	_mk_label(meta_box, "死んでも遺るソウルで永続強化", 150, 19, Color(1, 1, 1, 0.8))
+	meta_souls_label = _mk_label(meta_box, "", 182, 26, Color(0.8, 0.7, 1.0))
+	for i in META_DEFS.size():
+		var d = META_DEFS[i]
+		var y := 232 + i * 112
+		var info := Label.new()
+		info.position = Vector2(48, y)
+		info.size = Vector2(W - 200, 96)
+		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		info.add_theme_font_size_override("font_size", 21)
+		info.add_theme_color_override("font_color", Color(1, 1, 1))
+		info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		meta_box.add_child(info)
+		var btn := _mk_button(meta_box, "", Vector2(W - 152, y + 14), Vector2(120, 64), _buy_meta.bind(i))
+		btn.add_theme_font_size_override("font_size", 20)
+		meta_rows.append({"def": d, "info": info, "btn": btn})
+	_mk_button(meta_box, "とじる", Vector2(W * 0.5 - 80, 812), Vector2(160, 50), _close_meta)
+	meta_box.visible = false
+
+
+func _refresh_meta() -> void:
+	meta_souls_label.text = "ソウル: %d" % souls
+	for row in meta_rows:
+		var d = row["def"]
+		var lv: int = int(meta.get(d["id"], 0))
+		var mx: int = int(d["max"])
+		row["info"].text = "%s  (Lv %d/%d)\n%s" % [str(d["name"]), lv, mx, str(d["desc"])]
+		var btn: Button = row["btn"]
+		if lv >= mx:
+			btn.text = "MAX"
+			btn.disabled = true
+		else:
+			var cost: int = int(d["costs"][lv])
+			btn.text = "%d魂" % cost
+			btn.disabled = souls < cost
+
+
+func _buy_meta(i: int) -> void:
+	var d = META_DEFS[i]
+	var lv: int = int(meta.get(d["id"], 0))
+	if lv >= int(d["max"]):
+		return
+	var cost: int = int(d["costs"][lv])
+	if souls < cost:
+		sfx.play("hit", 0.8)
+		return
+	souls -= cost
+	meta[d["id"]] = lv + 1
+	save_best()
+	sfx.play("powerup")
+	_refresh_meta()
+
+
+func _open_meta() -> void:
+	sfx.play("click")
+	_meta_open = true
+	_refresh_meta()
+	meta_box.visible = true
+
+
+func _close_meta() -> void:
+	sfx.play("click")
+	_meta_open = false
+	meta_box.visible = false
 
 
 func _build_over() -> void:
@@ -682,7 +781,7 @@ func _offer_levelup() -> bool:
 		_offered_qty.append(1)
 		_offered_rar.append(5)
 	# 2) ユニークを確率でねじ込む(控えめ=トレハン感。「やった！」枠)
-	if not uniq_pool.is_empty() and _offered.size() < 3 and randf() < 0.26:
+	if not uniq_pool.is_empty() and _offered.size() < 3 and randf() < 0.26 + int(meta.get("m_luck", 0)) * 0.07:
 		_offered.append(uniq_pool[0])
 		_offered_qty.append(1)
 		_offered_rar.append(5)
@@ -1082,6 +1181,15 @@ func _reset(to_title: bool) -> void:
 		state = TITLE
 		title_box.visible = true
 	else:
+		# メタ進行(祭壇)の永続強化を開始時に反映
+		if int(meta.get("m_coin", 0)) > 0:
+			ups["coin"] = int(meta["m_coin"])
+		if int(meta.get("m_small", 0)) > 0:
+			ups["small"] = int(meta["m_small"])
+		_recompute_passives()
+		if int(meta.get("m_shield", 0)) > 0:
+			shield = true
+			bird.shield = true
 		state = PLAY
 		title_box.visible = false
 		bird.flap()
@@ -1094,8 +1202,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match state:
 		TITLE:
-			if _help_open:
-				return  # ヘルプ表示中はタップで開始しない
+			if _help_open or _meta_open:
+				return  # ヘルプ/祭壇 表示中はタップで開始しない
 			sfx.play("click")
 			_reset(false)
 		PLAY:
@@ -1733,11 +1841,13 @@ func _die() -> void:
 	_burst(bird.position, Color(1, 0.5, 0.2), 32, 300.0, 0.8, 4.5)
 	_burst(bird.position, Color.WHITE, 16, 200.0, 0.6, 3.0)
 
+	# ソウル獲得(メタ進行)
+	souls += int(floor(score / 20.0 * (1.0 + int(meta.get("m_soul", 0)) * 0.25)))
 	var new_best := false
 	if score > best:
 		best = score
 		new_best = true
-		save_best()
+	save_best()
 
 	multi_label.visible = false
 	over_score.text = "スコア  %d" % score
@@ -1882,6 +1992,14 @@ func load_best() -> void:
 			best = int(f.get_line())
 			if not f.eof_reached():
 				_player_name = f.get_line().strip_edges()
+			if not f.eof_reached():
+				souls = int(f.get_line())
+			if not f.eof_reached():
+				var ms := f.get_line().strip_edges()
+				for pair in ms.split(",", false):
+					var kv := pair.split(":")
+					if kv.size() == 2:
+						meta[kv[0]] = int(kv[1])
 
 
 func save_best() -> void:
@@ -1889,6 +2007,11 @@ func save_best() -> void:
 	if f:
 		f.store_line(str(best))
 		f.store_line(_player_name)
+		f.store_line(str(souls))
+		var parts: Array = []
+		for k in meta:
+			parts.append("%s:%d" % [k, int(meta[k])])
+		f.store_line(",".join(parts))
 
 
 # ================================================================ PV(Direct風デモ)
