@@ -182,6 +182,9 @@ var idle_t := 0.0
 var dead_cd := 0.0
 var _hitstop := 0.0
 var flash_rect: ColorRect
+var _ms_idx := 0
+var _beat_best := false
+const MILESTONES := [100, 250, 500, 1000, 2000, 4000, 7000, 10000, 15000, 20000]
 var current_biome := -1
 var tint_rect: ColorRect
 var _biome_grav := 1.0
@@ -1130,6 +1133,8 @@ func _reset(to_title: bool) -> void:
 	invuln_t = 0.0
 	shake = 0.0
 	_hitstop = 0.0
+	_ms_idx = 0
+	_beat_best = false
 	if flash_rect:
 		flash_rect.color = Color(1, 1, 1, 0)
 	current_biome = -1
@@ -1408,6 +1413,22 @@ func _update_play(delta: float) -> void:
 		var biome := (pipes_passed / BIOME_LEN) % BIOMES.size()
 		if biome != current_biome:
 			_enter_biome(biome)
+
+	# 節目突破コール
+	var crossed := -1
+	while _ms_idx < MILESTONES.size() and score >= MILESTONES[_ms_idx]:
+		crossed = MILESTONES[_ms_idx]
+		_ms_idx += 1
+	if crossed > 0:
+		_floater("%d点 突破！" % crossed, Vector2(W * 0.5, H * 0.5), Color(1, 0.9, 0.3), 42)
+		_flash(Color(1, 1, 1), 0.2)
+		sfx.play("score", 1.4)
+	# プレイ中の自己ベスト更新を祝う
+	if not _beat_best and best > 0 and score > best:
+		_beat_best = true
+		_floater("★ 自己ベスト更新！ ★", Vector2(W * 0.5, H * 0.44), Color(0.4, 1, 0.5), 36)
+		_flash(Color(0.5, 1, 0.6), 0.3)
+		sfx.play("fever")
 
 	score_label.text = str(score)
 	_update_combo_label()
