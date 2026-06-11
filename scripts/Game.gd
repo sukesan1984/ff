@@ -116,6 +116,17 @@ var idle_t := 0.0
 var dead_cd := 0.0
 var _hitstop := 0.0
 var flash_rect: ColorRect
+var current_biome := -1
+var tint_rect: ColorRect
+
+const BIOME_LEN := 10
+const BIOMES := [
+	{"name": "草原", "pb": Color(0.32, 0.78, 0.34), "pc": Color(0.24, 0.64, 0.27), "tint": Color(0, 0, 0, 0)},
+	{"name": "夕焼けの丘", "pb": Color(0.88, 0.52, 0.3), "pc": Color(0.72, 0.4, 0.24), "tint": Color(1.0, 0.5, 0.15, 0.16)},
+	{"name": "星空のかなた", "pb": Color(0.34, 0.42, 0.72), "pc": Color(0.24, 0.3, 0.56), "tint": Color(0.1, 0.12, 0.4, 0.24)},
+	{"name": "洞窟", "pb": Color(0.52, 0.46, 0.4), "pc": Color(0.4, 0.35, 0.3), "tint": Color(0.22, 0.13, 0.05, 0.30)},
+	{"name": "天空都市", "pb": Color(0.92, 0.96, 1.0), "pc": Color(0.72, 0.82, 0.96), "tint": Color(0.7, 0.85, 1.0, 0.13)},
+]
 
 # ===== PV(ニンテンドーダイレクト風デモ録画)用。FF_PV環境変数で有効化 =====
 var _pv := false
@@ -185,6 +196,16 @@ func _build() -> void:
 	world = Node2D.new()
 	add_child(world)
 
+	# バイオームの色味オーバーレイ(world より上・UIより下)
+	var tint_layer := CanvasLayer.new()
+	tint_layer.layer = 1
+	add_child(tint_layer)
+	tint_rect = ColorRect.new()
+	tint_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tint_rect.color = Color(0, 0, 0, 0)
+	tint_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tint_layer.add_child(tint_rect)
+
 	ground = Ground.new()
 	ground.W = W
 	ground.H = H
@@ -225,6 +246,17 @@ func _build() -> void:
 	flash_rect.color = Color(1, 1, 1, 0)
 	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(flash_rect)
+
+
+func _enter_biome(idx: int) -> void:
+	var first := current_biome == -1
+	current_biome = idx
+	var b = BIOMES[idx]
+	if tint_rect:
+		create_tween().tween_property(tint_rect, "color", b["tint"], 1.0)
+	if not first:
+		_floater("〜 %s 〜" % str(b["name"]), Vector2(W * 0.5, H * 0.30), Color(1, 1, 1), 42)
+		sfx.play("score", 1.3)
 
 
 func _flash(col: Color, a: float) -> void:
@@ -751,6 +783,9 @@ func _reset(to_title: bool) -> void:
 	_hitstop = 0.0
 	if flash_rect:
 		flash_rect.color = Color(1, 1, 1, 0)
+	current_biome = -1
+	if tint_rect:
+		tint_rect.color = Color(0, 0, 0, 0)
 	spawn_countdown = 200.0
 
 	bird.velocity = 0.0
@@ -993,6 +1028,12 @@ func _update_play(delta: float) -> void:
 	# 難易度(通過パイプ数で上昇。フィーバーのスコア倍増では跳ねない)
 	scroll_speed = BASE_SPEED + minf(pipes_passed * 6.0, 170.0)
 
+	# バイオーム(地帯)切替
+	if not _pv:
+		var biome := (pipes_passed / BIOME_LEN) % BIOMES.size()
+		if biome != current_biome:
+			_enter_biome(biome)
+
 	score_label.text = str(score)
 	_update_combo_label()
 
@@ -1005,7 +1046,7 @@ func _spawn_pipe() -> void:
 	if _pv:
 		gap = 235.0  # PVは見栄え優先で隙間を一定に
 	# ノコギリ付きパイプ(進んでから登場)。隙間は広めにして公平に
-	var has_saw := not _pv and pipes_passed >= 18 and randf() < 0.22
+	var has_saw := not _pv and pipes_passed >= 16 and randf() < 0.16 + minf(pipes_passed * 0.003, 0.16)
 	if has_saw:
 		gap += 80.0
 	var margin := 90.0
@@ -1037,11 +1078,15 @@ func _spawn_pipe() -> void:
 		p.osc_speed = randf_range(1.2, 2.0)
 		p.phase = randf_range(0.0, TAU)
 
-	# 時間帯に合わせてパイプ色を少し変化
-	var tint := bg.tod
-	if tint > 0.5 and tint < 0.92:
-		p.body_col = Color(0.30, 0.55, 0.62)  # 夜は青緑
-		p.cap_col = Color(0.22, 0.45, 0.52)
+	# バイオームに合わせて土管色を変える(PVは時間帯ベース)
+	if not _pv and current_biome >= 0:
+		p.body_col = BIOMES[current_biome]["pb"]
+		p.cap_col = BIOMES[current_biome]["pc"]
+	elif _pv:
+		var tint := bg.tod
+		if tint > 0.5 and tint < 0.92:
+			p.body_col = Color(0.30, 0.55, 0.62)
+			p.cap_col = Color(0.22, 0.45, 0.52)
 
 	world.add_child(p)
 	pipes.append(p)
