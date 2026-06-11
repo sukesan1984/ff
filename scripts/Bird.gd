@@ -20,6 +20,7 @@ var base_color := Color(1.0, 0.82, 0.25)
 var fever := false
 var shield := false
 var magnet := false
+var diving := false       # 急降下中(落下上限を無視し、姿勢を立てる)
 var deco := {}   # ビルドに応じた見た目(crown/helmet/cape/goggles/phoenix/gold/small)
 var _t := 0.0
 
@@ -37,11 +38,13 @@ func flap() -> void:
 
 func tick(delta: float) -> void:
 	velocity += GRAVITY * gravity_mult * delta
-	velocity = minf(velocity, max_fall)
+	velocity = minf(velocity, 1600.0 if diving else max_fall)
 	position.y += velocity * delta
-	# 上昇で上向き、落下で下向きに傾ける
+	# 上昇で上向き、落下で下向きに傾ける(ダイブ中は急角度固定)
 	var target := remap(clampf(velocity, FLAP_IMPULSE, MAX_FALL), FLAP_IMPULSE, MAX_FALL, deg_to_rad(-32), deg_to_rad(78))
-	angle = lerp_angle(angle, target, clampf(delta * 9.0, 0.0, 1.0))
+	if diving:
+		target = deg_to_rad(86)
+	angle = lerp_angle(angle, target, clampf(delta * (16.0 if diving else 9.0), 0.0, 1.0))
 
 
 func anim(delta: float) -> void:
@@ -77,6 +80,18 @@ func _draw() -> void:
 	if magnet:
 		var pulse := 1.0 + 0.12 * sin(_t * 8.0)
 		draw_arc(Vector2.ZERO, 46 * pulse, 0, TAU, 32, Color(0.4, 0.9, 1.0, 0.5), 3.0)
+
+	# --- ダイブの炎(急降下の迫力) ---
+	if diving:
+		for k in 4:
+			var fy := -RADIUS - 6.0 - k * 9.0
+			var fw := 7.0 - k * 1.4
+			var flick := sin(_t * 40.0 + k * 2.0) * 2.0
+			draw_circle(Vector2(flick, fy), fw, Color(1.0, 0.55 - k * 0.1, 0.1, 0.65 - k * 0.13))
+		# スピード線
+		for k in 3:
+			var lx := -12.0 + k * 12.0
+			draw_line(Vector2(lx, -RADIUS - 14), Vector2(lx, -RADIUS - 30), Color(1, 1, 1, 0.4), 2.0)
 
 	# --- フィーバー中の輝き(虹色グロー) ---
 	if fever:

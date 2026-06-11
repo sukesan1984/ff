@@ -21,6 +21,7 @@ var bird: Bird
 var ui: CanvasLayer
 var hud: Hud
 var sfx: Sfx
+var music: Music
 var score_label: Label
 var multi_label: Label
 var title_box: Control
@@ -134,6 +135,16 @@ const EVO_DEFS := [
 	{"id": "evo_greed", "name": "★金の亡者★", "desc": "コインがすべて巨大化(高額)", "short": "亡", "req": {"coin": 5, "biglover": 3}},
 ]
 
+# 悪魔の契約=強力な効果と引き換えに呪いを受ける(デッキ構築の決断)。各1回のみ
+const DEAL_DEFS := [
+	{"id": "deal_greed", "name": "悪魔の契約・強欲", "short": "契", "deal": true,
+		"desc": "今すぐユニークを1つ獲得。ただし体が大きくなる(当たり判定+)"},
+	{"id": "deal_haste", "name": "悪魔の契約・刹那", "short": "契", "deal": true,
+		"desc": "コインの価値+3。ただし世界が速くなる"},
+	{"id": "deal_soul", "name": "悪魔の契約・魂喰", "short": "契", "deal": true,
+		"desc": "ソウル+60を即獲得。ただしゲージが溜まりにくくなる"},
+]
+
 # ユニーク(固有)アイテム=稀ドロップの「やった！」枠(ディアブロのトレハン感)。各1回のみ
 const UNIQUES := [
 	{"id": "u_midas", "name": "ミダスの指輪", "short": "指", "desc": "コインの価値が常に2倍"},
@@ -183,6 +194,11 @@ var idle_t := 0.0
 var dead_cd := 0.0
 var _hitstop := 0.0
 var flash_rect: ColorRect
+# ダイブ(ホールドで急降下)
+var _pressing := false
+var _press_t := 0.0
+var diving := false
+const DIVE_HOLD := 0.22
 var _ms_idx := 0
 var _beat_best := false
 const MILESTONES := [100, 250, 500, 1000, 2000, 4000, 7000, 10000, 15000, 20000]
@@ -304,6 +320,10 @@ func _build() -> void:
 
 	sfx = Sfx.new()
 	add_child(sfx)
+
+	music = Music.new()
+	add_child(music)
+	music.play("main", 1.2)
 
 	ui = CanvasLayer.new()
 	ui.layer = 5
@@ -428,7 +448,7 @@ func _build_help() -> void:
 	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
 	body.add_theme_constant_override("line_spacing", 6)
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	body.text = "【そうさ】タップ／スペースで羽ばたく\n【もくてき】土管のすき間をくぐってスコアを稼ぐ\n\n" + \
+	body.text = "【そうさ】タップ／スペースで羽ばたく\n【急降下】長押しでダイブ！ノコギリ破壊＆ゴブリン捕獲\n【もくてき】土管のすき間をくぐってスコアを稼ぐ\n\n" + \
 		"◆ コイン：集めてフィーバーゲージを溜める\n" + \
 		"◆ コンボ：連続取得で倍率アップ\n" + \
 		"◆ ニアミス：土管スレスレ通過でボーナス＆ゲージ大\n" + \
@@ -708,7 +728,7 @@ func _lv(id: String) -> int:
 
 
 func _recompute_passives() -> void:
-	cur_radius = maxf(11.0, 17.0 - _lv("small") * 1.5)
+	cur_radius = maxf(11.0, 17.0 - _lv("small") * 1.5) + (2.5 if _lv("deal_greed") > 0 else 0.0)
 	# ユニークフラグ
 	_u_midas = _lv("u_midas") > 0
 	_u_hourglass = _lv("u_hourglass") > 0
@@ -794,6 +814,16 @@ func _offer_levelup() -> bool:
 		_offered.append(uniq_pool[0])
 		_offered_qty.append(1)
 		_offered_rar.append(5)
+	# 2.5) 悪魔の契約(未契約から稀に1枚。強力+呪いの決断)
+	var deal_pool: Array = []
+	for dd in DEAL_DEFS:
+		if _lv(dd["id"]) == 0:
+			deal_pool.append(dd)
+	if not deal_pool.is_empty() and _offered.size() < 3 and randf() < 0.16:
+		deal_pool.shuffle()
+		_offered.append(deal_pool[0])
+		_offered_qty.append(1)
+		_offered_rar.append(0)  # 0=契約(専用スタイル)
 	# 3) 残りは通常強化(アビリティ自体のレア度色で「型」を意識)
 	for d in pool:
 		if _offered.size() >= 3:
@@ -809,20 +839,29 @@ func _offer_levelup() -> bool:
 		if i < _offered.size():
 			var d = _offered[i]
 			var is_evo: bool = d.has("req")
-			var is_uniq: bool = not d.has("req") and not d.has("max")
+			var is_deal: bool = d.has("deal")
+			var is_uniq: bool = not is_evo and not is_deal and not d.has("max")
 			var rar: int = _offered_rar[i]
 			var sb: StyleBoxFlat = cd["sb"]
-			sb.bg_color = RAR_BG[rar]
-			sb.border_color = RAR_COLS[rar]
-			sb.set_border_width_all(6 if rar >= 5 else 3)
-			cd["icon"].add_theme_color_override("font_color", RAR_COLS[rar])
-			cd["name"].add_theme_color_override("font_color", RAR_COLS[rar].lightened(0.4))
-			if is_uniq:
-				cd["desc"].text = "【★UNIQUE★】%s" % str(d["desc"])
-			elif is_evo:
-				cd["desc"].text = "【進化】%s" % str(d["desc"])
+			if is_deal:
+				sb.bg_color = Color(0.22, 0.03, 0.06, 0.97)
+				sb.border_color = Color(0.95, 0.15, 0.2)
+				sb.set_border_width_all(5)
+				cd["icon"].add_theme_color_override("font_color", Color(1, 0.25, 0.3))
+				cd["name"].add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+				cd["desc"].text = "【契約】%s" % str(d["desc"])
 			else:
-				cd["desc"].text = "【%s】%s  Lv %d→%d" % [RAR_NAMES[rar], str(d["desc"]), _lv(d["id"]), _lv(d["id"]) + 1]
+				sb.bg_color = RAR_BG[rar]
+				sb.border_color = RAR_COLS[rar]
+				sb.set_border_width_all(6 if rar >= 5 else 3)
+				cd["icon"].add_theme_color_override("font_color", RAR_COLS[rar])
+				cd["name"].add_theme_color_override("font_color", RAR_COLS[rar].lightened(0.4))
+				if is_uniq:
+					cd["desc"].text = "【★UNIQUE★】%s" % str(d["desc"])
+				elif is_evo:
+					cd["desc"].text = "【進化】%s" % str(d["desc"])
+				else:
+					cd["desc"].text = "【%s】%s  Lv %d→%d" % [RAR_NAMES[rar], str(d["desc"]), _lv(d["id"]), _lv(d["id"]) + 1]
 			cd["icon"].text = str(d["short"])
 			cd["name"].text = str(d["name"])
 			btn.visible = true
@@ -875,7 +914,8 @@ func _on_card(i: int) -> void:
 		return
 	# 2タップ目:確定
 	var d = _offered[i]
-	var is_uniq: bool = not d.has("req") and not d.has("max")
+	var is_deal: bool = d.has("deal")
+	var is_uniq: bool = not d.has("req") and not d.has("max") and not is_deal
 	var is_special: bool = is_uniq or d.has("req")
 	var times: int = _offered_qty[i] if i < _offered_qty.size() else 1
 	for _k in times:
@@ -885,7 +925,14 @@ func _on_card(i: int) -> void:
 	_leveling = false
 	_selected_card = -1
 	level_box.visible = false
-	if is_special:
+	if is_deal:
+		# 契約の暗い演出
+		sfx.play("die")
+		_hit_stop(0.10)
+		_flash(Color(0.6, 0.05, 0.1), 0.5)
+		shake = maxf(shake, 12.0)
+		_floater("……契約成立", Vector2(W * 0.5, H * 0.4), Color(1, 0.3, 0.35), 38)
+	elif is_special:
 		# ユニーク/進化は「やった！」演出
 		sfx.play("fever")
 		_hit_stop(0.12)
@@ -924,6 +971,13 @@ func _apply_upgrade(id: String) -> void:
 	# 進化:ドローン軍団=子機+1
 	if id == "evo_drone":
 		_add_satellite()
+	# 悪魔の契約の即時効果
+	if id == "deal_greed":
+		_grant_random_unique()
+	if id == "deal_soul":
+		souls += 60
+		save_best()
+		_floater("ソウル +60", bird.position + Vector2(0, -84), Color(0.8, 0.7, 1.0), 28)
 
 
 func _add_satellite() -> void:
@@ -1140,6 +1194,9 @@ func _reset(to_title: bool) -> void:
 	_hitstop = 0.0
 	_ms_idx = 0
 	_beat_best = false
+	_pressing = false
+	_press_t = 0.0
+	_end_dive()
 	if flash_rect:
 		flash_rect.color = Color(1, 1, 1, 0)
 	current_biome = -1
@@ -1182,6 +1239,8 @@ func _reset(to_title: bool) -> void:
 		_boss.queue_free()
 		_boss = null
 	_next_boss_at = 3 if OS.has_environment("FF_BOSS") else 40
+	if music:
+		music.play("main", 0.8)
 	if level_box:
 		level_box.visible = false
 	_recompute_passives()
@@ -1217,6 +1276,13 @@ func _reset(to_title: bool) -> void:
 
 # ---------------------------------------------------------------- 入力
 func _unhandled_input(event: InputEvent) -> void:
+	# 離した:ダイブ終了
+	if _is_release(event):
+		_pressing = false
+		_press_t = 0.0
+		if diving:
+			_end_dive()
+		return
 	if not _is_flap(event):
 		return
 	match state:
@@ -1231,6 +1297,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			bird.flap()
 			sfx.play("flap", randf_range(0.92, 1.08))
 			_feathers()
+			_pressing = true
+			_press_t = 0.0
 		DEAD:
 			# 名前入力やランキング表示中はタップでリスタートしない
 			if _modal:
@@ -1248,6 +1316,29 @@ func _is_flap(event: InputEvent) -> bool:
 	if event is InputEventKey and event.pressed and not event.echo:
 		return event.keycode in [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER, KEY_UP, KEY_W]
 	return false
+
+
+func _is_release(event: InputEvent) -> bool:
+	if event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		return true
+	if event is InputEventScreenTouch and not event.pressed:
+		return true
+	if event is InputEventKey and not event.pressed:
+		return event.keycode in [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER, KEY_UP, KEY_W]
+	return false
+
+
+func _start_dive() -> void:
+	diving = true
+	bird.diving = true
+	sfx.play("dive")
+	_feathers()
+
+
+func _end_dive() -> void:
+	diving = false
+	if bird:
+		bird.diving = false
 
 
 # ---------------------------------------------------------------- メインループ
@@ -1325,12 +1416,23 @@ func _update_play(delta: float) -> void:
 	speed_mult *= _biome_spd  # バイオームのスピード個性
 	if _u_hourglass:
 		speed_mult *= 0.85  # 時の砂時計
+	if _lv("deal_haste") > 0:
+		speed_mult *= 1.08  # 契約・刹那の呪い
 	var dx := scroll_speed * delta * speed_mult
 	var pdelta := delta * speed_mult
 
 	# 背景・地面
 	bg.tick(dx, delta)
 	ground.tick(dx)
+
+	# ダイブ(ホールドで急降下。ノコギリ破壊&ゴブリン捕獲の攻め手)
+	if _pressing and state == PLAY:
+		_press_t += delta
+		if not diving and _press_t >= DIVE_HOLD:
+			_start_dive()
+	if diving:
+		bird.velocity = minf(bird.velocity + 5200.0 * delta, 1500.0)
+		bird.velocity = maxf(bird.velocity, 650.0)
 
 	# 鳥
 	bird.tick(pdelta)
@@ -1566,10 +1668,10 @@ func _spawn_coins(x: float, center: float, gap: float) -> void:
 	var cy := center + randf_range(-gap * 0.2, gap * 0.2)
 	for i in n:
 		var c := Coin.new()
-		c.value = 2 + _lv("coin")
+		c.value = 2 + _lv("coin") + (3 if _lv("deal_haste") > 0 else 0)
 		if _evo_greed:  # 金の亡者:コインが全て巨大化
 			c.big = true
-			c.value = 12 + _lv("coin") * 2
+			c.value = 12 + _lv("coin") * 2 + (3 if _lv("deal_haste") > 0 else 0)
 		var t := float(i) - (n - 1) * 0.5
 		var ox := 0.0
 		var oy := 0.0
@@ -1703,12 +1805,23 @@ func _circle_rect(c: Vector2, r: float, rect: Rect2) -> bool:
 
 
 func _check_saws() -> void:
-	if fever_active or invuln_t > 0.0 or _evo_dodge:
-		return
-	for s in saws:
-		if s.active() and bird.position.distance_to(s.position) < cur_radius + Saw.RADIUS * 0.8:
-			_on_hit(false)
-			return
+	for s in saws.duplicate():
+		if not s.active():
+			continue
+		if bird.position.distance_to(s.position) < cur_radius + Saw.RADIUS * 0.8:
+			if diving:
+				# ダイブでノコギリを叩き割る!
+				_destroy_saw(s)
+				score += 10
+				_add_fever(0.06)
+				_hit_stop(0.05)
+				sfx.play("crash")
+				_floater("クラッシュ！ +10", bird.position + Vector2(0, -46), Color(0.9, 0.95, 1), 30)
+			elif fever_active or invuln_t > 0.0 or _evo_dodge:
+				pass
+			else:
+				_on_hit(false)
+				return
 
 
 func _destroy_saw(s: Saw) -> void:
@@ -1731,8 +1844,8 @@ func _update_goblins(delta: float, dx: float) -> void:
 			c.position = g.position + Vector2(-6, 8)
 			world.add_child(c)
 			coins.append(c)
-		# 捕獲(報酬は常に有効)
-		if bird.position.distance_to(g.position) < cur_radius + Goblin.RADIUS:
+		# 捕獲(報酬は常に有効。ダイブ中は捕獲範囲が広い)
+		if bird.position.distance_to(g.position) < cur_radius + Goblin.RADIUS + (16.0 if diving else 0.0):
 			_catch_goblin(g)
 		elif g.position.x < -70.0:
 			goblins.erase(g)
@@ -1762,6 +1875,7 @@ func _start_boss() -> void:
 	_boss.ground_y = GROUND_Y
 	_boss.attacks_left = 6
 	world.add_child(_boss)
+	music.play("boss", 0.4)
 	sfx.play("fever")
 	_flash(Color(0.7, 0.1, 0.1), 0.45)
 	shake = maxf(shake, 16.0)
@@ -1775,6 +1889,7 @@ func _defeat_boss() -> void:
 		_boss.queue_free()
 		_boss = null
 	_next_boss_at = pipes_passed + 45
+	music.play("fever" if fever_active else "main", 0.8)
 	score += 200 + pipes_passed * 2
 	_add_fever(0.5)
 	sfx.play("fever")
@@ -1908,6 +2023,8 @@ func _add_fever(a: float) -> void:
 		mult *= 2.0  # フィーバーの心臓
 	if _evo_engine:
 		mult *= 1.5  # 永久機関
+	if _lv("deal_soul") > 0:
+		mult *= 0.75  # 契約・魂喰の呪い
 	fever_gauge += a * mult
 	if fever_gauge >= 1.0:
 		# ゲージ満タン:先にレベルアップを選ばせ、確定後にフィーバー(無敵)へ
@@ -1928,6 +2045,8 @@ func _start_fever() -> void:
 	fever_time = _fever_dur()
 	fever_gauge = 1.0
 	bird.fever = true
+	if not _boss_active:
+		music.play("fever", 0.3)
 	sfx.play("fever")
 	shake = maxf(shake, 16.0)
 	_hit_stop(0.10)
@@ -1940,6 +2059,7 @@ func _end_fever() -> void:
 	fever_active = false
 	bird.fever = false
 	fever_gauge = 0.0
+	music.play("boss" if _boss_active else "main", 0.8)
 
 
 # ---------------------------------------------------------------- 被弾・死亡
@@ -1975,6 +2095,7 @@ func _die() -> void:
 		return
 	state = DEAD
 	bird.alive = false
+	_end_dive()
 	bird.velocity = -260.0
 	combo = 0
 	dead_cd = 0.6
@@ -2083,6 +2204,9 @@ func _build_summary() -> Array:
 	for u in UNIQUES:
 		if _lv(u["id"]) > 0:
 			out.append({"short": u["short"], "lv": 1, "max": 1, "evo": true})
+	for dd in DEAL_DEFS:
+		if _lv(dd["id"]) > 0:
+			out.append({"short": dd["short"], "lv": 1, "max": 1, "evo": true})
 	return out
 
 

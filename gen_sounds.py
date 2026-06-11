@@ -162,4 +162,17 @@ write_wav("fever.wav", mix(
 # UIクリック/スタート
 write_wav("click.wav", tone(880, 0.08, vol=0.35, wave_type="square", release=0.05, sweep=0.3))
 
+# 急降下(ダイブ): 下降ウーシュ
+write_wav("dive.wav", mix(
+    tone(700, 0.30, vol=0.32, wave_type="saw", attack=0.01, release=0.22, sweep=-0.65),
+    noise(0.28, vol=0.18, attack=0.02, release=0.22),
+))
+
+# クラッシュ(ダイブでノコギリ破壊): 金属的な砕け
+write_wav("crash.wav", mix(
+    tone(520, 0.16, vol=0.34, wave_type="square", release=0.12, sweep=-0.35),
+    tone(1280, 0.10, vol=0.2, wave_type="saw", release=0.08, sweep=-0.2),
+    noise(0.14, vol=0.3, release=0.12),
+))
+
 print("done.")
