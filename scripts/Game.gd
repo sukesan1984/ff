@@ -50,39 +50,75 @@ var _revive_count := 0         # このランで復活した回数
 var _regen_count := 0          # シールド再生用の通過カウンタ
 var _evo_gold := false
 var _evo_phoenix := false
+# ユニーク効果フラグ
+var _u_midas := false
+var _u_hourglass := false
+var _u_greed := false
+var _u_glass := false
+var _u_feverheart := false
+var _u_cloak := false
+var _u_aegis := false
 var cur_radius := 17.0
 var level_box: Control
 var level_cards: Array = []    # 3枚のカードButton
 var _offered: Array = []       # 今提示中の定義
 var _level_lock := false       # 出現直後の誤タップ防止
 var _selected_card := -1       # 2タップ確定式の選択中インデックス
+var _offered_qty: Array = []   # 各カードの付与レベル数(レア度で変化)
+var _offered_rar: Array = []   # 各カードのレア度(1-5)
+var _fever_pending := false    # ゲージ満タン→カード選択後にフィーバー開始
 var level_hint: Label
 
 const UP_DEFS := [
-	{"id": "small", "name": "ちいさくなる", "desc": "当たり判定が小さくなる", "short": "小", "max": 4},
-	{"id": "float", "name": "ふわり", "desc": "重力が軽くなる", "short": "浮", "max": 3},
-	{"id": "slow", "name": "スロー体質", "desc": "全体スピードが遅くなる", "short": "遅", "max": 3},
-	{"id": "coin", "name": "こばん大好き", "desc": "コインの価値 +1", "short": "金", "max": 5},
-	{"id": "feverdur", "name": "フィーバー長持ち", "desc": "フィーバーが1秒長く", "short": "熱", "max": 4},
-	{"id": "fevergain", "name": "フィーバー体質", "desc": "ゲージが溜まりやすい", "short": "充", "max": 3},
-	{"id": "combo", "name": "コンボ名人", "desc": "コンボ倍率がぐんぐん上がる", "short": "連", "max": 3},
-	{"id": "near", "name": "ニアミスの達人", "desc": "NICE判定が広がりボーナス増", "short": "際", "max": 3},
-	{"id": "magnet", "name": "マグネット体質", "desc": "常にコインを軽く引き寄せる", "short": "磁", "max": 3},
-	{"id": "luck", "name": "強運", "desc": "パワーアップが出やすい", "short": "運", "max": 3},
-	{"id": "biglover", "name": "大玉好き", "desc": "でかコインが増え価値も上がる", "short": "大", "max": 3},
-	{"id": "midas", "name": "ミダスタッチ", "desc": "フィーバー中コインさらに2倍", "short": "倍", "max": 1},
-	{"id": "nearfever", "name": "際どい快感", "desc": "ニアミスでゲージ大量", "short": "快", "max": 2},
-	{"id": "shieldregen", "name": "守りの心得", "desc": "今すぐ盾＋一定間隔で盾再生", "short": "盾", "max": 2},
-	{"id": "lucky7", "name": "ラッキーナンバー", "desc": "コンボ10ごとに大ボーナス", "short": "7", "max": 3},
-	{"id": "featherfall", "name": "羽のように", "desc": "落下が遅く操作しやすい", "short": "羽", "max": 3},
-	{"id": "satellite", "name": "サテライト子機", "desc": "周回する子機がコイン回収＆ノコギリ破壊", "short": "機", "max": 3},
-	{"id": "revive", "name": "不死鳥", "desc": "1度だけ復活できる", "short": "蘇", "max": 1},
+	{"id": "small", "name": "ちいさくなる", "desc": "当たり判定が小さくなる", "short": "小", "max": 4, "rar": 1},
+	{"id": "float", "name": "ふわり", "desc": "重力が軽くなる", "short": "浮", "max": 3, "rar": 1},
+	{"id": "slow", "name": "スロー体質", "desc": "全体スピードが遅くなる", "short": "遅", "max": 3, "rar": 3},
+	{"id": "coin", "name": "こばん大好き", "desc": "コインの価値 +1", "short": "金", "max": 5, "rar": 1},
+	{"id": "feverdur", "name": "フィーバー長持ち", "desc": "フィーバーが1秒長く", "short": "熱", "max": 4, "rar": 2},
+	{"id": "fevergain", "name": "フィーバー体質", "desc": "ゲージが溜まりやすい", "short": "充", "max": 3, "rar": 2},
+	{"id": "combo", "name": "コンボ名人", "desc": "コンボ倍率がぐんぐん上がる", "short": "連", "max": 3, "rar": 2},
+	{"id": "near", "name": "ニアミスの達人", "desc": "NICE判定が広がりボーナス増", "short": "際", "max": 3, "rar": 2},
+	{"id": "magnet", "name": "マグネット体質", "desc": "常にコインを軽く引き寄せる", "short": "磁", "max": 3, "rar": 2},
+	{"id": "luck", "name": "強運", "desc": "パワーアップが出やすい", "short": "運", "max": 3, "rar": 2},
+	{"id": "biglover", "name": "大玉好き", "desc": "でかコインが増え価値も上がる", "short": "大", "max": 3, "rar": 2},
+	{"id": "midas", "name": "ミダスタッチ", "desc": "フィーバー中コインさらに2倍", "short": "倍", "max": 1, "rar": 3},
+	{"id": "nearfever", "name": "際どい快感", "desc": "ニアミスでゲージ大量", "short": "快", "max": 2, "rar": 3},
+	{"id": "shieldregen", "name": "守りの心得", "desc": "今すぐ盾＋一定間隔で盾再生", "short": "盾", "max": 2, "rar": 3},
+	{"id": "lucky7", "name": "ラッキーナンバー", "desc": "コンボ10ごとに大ボーナス", "short": "7", "max": 3, "rar": 2},
+	{"id": "featherfall", "name": "羽のように", "desc": "落下が遅く操作しやすい", "short": "羽", "max": 3, "rar": 1},
+	{"id": "satellite", "name": "サテライト子機", "desc": "周回する子機がコイン回収＆ノコギリ破壊", "short": "機", "max": 3, "rar": 4},
+	{"id": "revive", "name": "不死鳥", "desc": "1度だけ復活できる", "short": "蘇", "max": 1, "rar": 4},
+]
+
+# レアリティ(1=コモン..4=エピック, 5=レジェンダリー/進化)
+const RAR_NAMES := ["", "コモン", "アンコモン", "レア", "エピック", "レジェンダリー"]
+const RAR_COLS := [
+	Color(0.7, 0.7, 0.7), Color(0.75, 0.78, 0.82), Color(0.4, 0.85, 0.45),
+	Color(0.4, 0.72, 1.0), Color(0.75, 0.45, 1.0), Color(1.0, 0.7, 0.2),
+]
+const RAR_BG := [
+	Color(0.15, 0.15, 0.18, 0.95), Color(0.16, 0.17, 0.2, 0.95), Color(0.1, 0.22, 0.12, 0.95),
+	Color(0.1, 0.18, 0.3, 0.95), Color(0.2, 0.12, 0.3, 0.95), Color(0.4, 0.2, 0.05, 0.95),
 ]
 
 # 進化(シナジー)。前提を満たすと専用カードが出現する
 const EVO_DEFS := [
-	{"id": "evo_gold", "name": "★黄金旋風★", "desc": "コイン全自動回収＋価値1.5倍", "short": "✦金", "req": {"coin": 5, "magnet": 3}},
-	{"id": "evo_phoenix", "name": "★不死鳥転生★", "desc": "復活時にフィーバー＆復活回数+1", "short": "✦蘇", "req": {"revive": 1, "feverdur": 4}},
+	{"id": "evo_gold", "name": "★黄金旋風★", "desc": "コイン全自動回収＋価値1.5倍", "short": "旋", "req": {"coin": 5, "magnet": 3}},
+	{"id": "evo_phoenix", "name": "★不死鳥転生★", "desc": "復活時にフィーバー＆復活回数+1", "short": "転", "req": {"revive": 1, "feverdur": 4}},
+]
+
+# ユニーク(固有)アイテム=稀ドロップの「やった！」枠(ディアブロのトレハン感)。各1回のみ
+const UNIQUES := [
+	{"id": "u_midas", "name": "ミダスの指輪", "short": "指", "desc": "コインの価値が常に2倍"},
+	{"id": "u_hourglass", "name": "時の砂時計", "short": "砂", "desc": "世界が常に15%スロー"},
+	{"id": "u_greed", "name": "強欲の王冠", "short": "冠", "desc": "コイン+80%／隙間-15(危険)"},
+	{"id": "u_magnetking", "name": "磁王のコア", "short": "核", "desc": "全コインを自動回収"},
+	{"id": "u_glass", "name": "ガラスの大砲", "short": "砲", "desc": "スコア2倍／隙間-20(危険)"},
+	{"id": "u_feverheart", "name": "フィーバーの心臓", "short": "芯", "desc": "ゲージ倍速＆フィーバー超延長"},
+	{"id": "u_cloak", "name": "羽毛の外套", "short": "套", "desc": "落下がとても遅くなる"},
+	{"id": "u_aegis", "name": "イージスの盾", "short": "璧", "desc": "今すぐ盾＋高速で盾再生"},
+	{"id": "u_swarm", "name": "サテライト群", "short": "群", "desc": "子機を一気に2機追加"},
+	{"id": "u_phoenixheart", "name": "不死鳥の心臓", "short": "翼", "desc": "復活+1＆復活で即フィーバー"},
 ]
 
 # 障害物
@@ -506,11 +542,29 @@ func _lv(id: String) -> int:
 
 func _recompute_passives() -> void:
 	cur_radius = maxf(11.0, 17.0 - _lv("small") * 1.5)
+	# ユニークフラグ
+	_u_midas = _lv("u_midas") > 0
+	_u_hourglass = _lv("u_hourglass") > 0
+	_u_greed = _lv("u_greed") > 0
+	_u_glass = _lv("u_glass") > 0
+	_u_feverheart = _lv("u_feverheart") > 0
+	_u_cloak = _lv("u_cloak") > 0
+	_u_aegis = _lv("u_aegis") > 0
+	_evo_gold = _lv("evo_gold") > 0 or _lv("u_magnetking") > 0
+	_evo_phoenix = _lv("evo_phoenix") > 0 or _lv("u_phoenixheart") > 0
 	if bird:
-		bird.gravity_mult = (1.0 - _lv("float") * 0.07) * _biome_grav
-		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0
-	_evo_gold = _lv("evo_gold") > 0
-	_evo_phoenix = _lv("evo_phoenix") > 0
+		bird.gravity_mult = (1.0 - _lv("float") * 0.07) * _biome_grav * (0.7 if _u_cloak else 1.0)
+		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0 - (260.0 if _u_cloak else 0.0)
+		# ビルドに応じた見た目(装備が姿に出る)
+		bird.deco = {
+			"small": _lv("small"),
+			"crown": _lv("coin") + _lv("biglover") + (2 if _u_greed else 0),
+			"helmet": _lv("shieldregen") > 0 or _u_aegis,
+			"cape": _lv("featherfall") + (2 if _u_cloak else 0),
+			"goggles": _lv("satellite") > 0,
+			"phoenix": _lv("revive") > 0 or _evo_phoenix,
+			"gold": _evo_gold or _u_midas,
+		}
 
 
 func _evo_ready(e: Dictionary) -> bool:
@@ -520,14 +574,35 @@ func _evo_ready(e: Dictionary) -> bool:
 	return true
 
 
-func _offer_levelup() -> void:
+func _roll_rarity() -> int:
+	var r := randf()
+	if r < 0.56:
+		return 1  # コモン +1
+	if r < 0.86:
+		return 2  # アンコモン +2
+	if r < 0.97:
+		return 3  # レア +3
+	return 4      # エピック MAX
+
+
+func remain_to_max(d: Dictionary) -> int:
+	return int(d["max"]) - _lv(str(d["id"]))
+
+
+func _offer_levelup() -> bool:
 	if _leveling or state != PLAY or _pv:
-		return
+		return false
 	# 進化(条件を満たし未取得)を最優先で出す
 	var evos: Array = []
 	for e in EVO_DEFS:
 		if _lv(e["id"]) == 0 and _evo_ready(e):
 			evos.append(e)
+	# 未取得ユニーク
+	var uniq_pool: Array = []
+	for u in UNIQUES:
+		if _lv(u["id"]) == 0:
+			uniq_pool.append(u)
+	uniq_pool.shuffle()
 	# 通常強化(上限未満)
 	var pool: Array = []
 	for d in UP_DEFS:
@@ -535,33 +610,48 @@ func _offer_levelup() -> void:
 			pool.append(d)
 	pool.shuffle()
 	_offered = []
-	for e in evos:
-		if _offered.size() < 3:
-			_offered.append(e)
+	_offered_qty = []
+	_offered_rar = []
+	# 1) 進化(前提達成)を最優先で1枠
+	if not evos.is_empty():
+		evos.shuffle()
+		_offered.append(evos[0])
+		_offered_qty.append(1)
+		_offered_rar.append(5)
+	# 2) ユニークを確率でねじ込む(控えめ=トレハン感。「やった！」枠)
+	if not uniq_pool.is_empty() and _offered.size() < 3 and randf() < 0.26:
+		_offered.append(uniq_pool[0])
+		_offered_qty.append(1)
+		_offered_rar.append(5)
+	# 3) 残りは通常強化(アビリティ自体のレア度色で「型」を意識)
 	for d in pool:
-		if _offered.size() < 3:
-			_offered.append(d)
+		if _offered.size() >= 3:
+			break
+		_offered.append(d)
+		_offered_qty.append(1)
+		_offered_rar.append(int(d["rar"]))
 	if _offered.is_empty():
-		return
+		return false
 	for i in level_cards.size():
 		var cd = level_cards[i]
 		var btn: Button = cd["btn"]
 		if i < _offered.size():
 			var d = _offered[i]
-			var evo: bool = d.has("req")
+			var is_evo: bool = d.has("req")
+			var is_uniq: bool = not d.has("req") and not d.has("max")
+			var rar: int = _offered_rar[i]
 			var sb: StyleBoxFlat = cd["sb"]
-			if evo:
-				sb.bg_color = Color(0.45, 0.18, 0.04, 0.95)
-				sb.border_color = Color(1, 0.7, 0.2)
-				cd["icon"].add_theme_color_override("font_color", Color(1, 0.85, 0.35))
-				cd["name"].add_theme_color_override("font_color", Color(1, 0.85, 0.35))
-				cd["desc"].text = str(d["desc"])
+			sb.bg_color = RAR_BG[rar]
+			sb.border_color = RAR_COLS[rar]
+			sb.set_border_width_all(6 if rar >= 5 else 3)
+			cd["icon"].add_theme_color_override("font_color", RAR_COLS[rar])
+			cd["name"].add_theme_color_override("font_color", RAR_COLS[rar].lightened(0.4))
+			if is_uniq:
+				cd["desc"].text = "【★UNIQUE★】%s" % str(d["desc"])
+			elif is_evo:
+				cd["desc"].text = "【進化】%s" % str(d["desc"])
 			else:
-				sb.bg_color = Color(0.1, 0.18, 0.3, 0.95)
-				sb.border_color = Color(0.4, 0.72, 1.0)
-				cd["icon"].add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
-				cd["name"].add_theme_color_override("font_color", Color(1, 1, 1))
-				cd["desc"].text = "%s   Lv %d→%d" % [d["desc"], _lv(d["id"]), _lv(d["id"]) + 1]
+				cd["desc"].text = "【%s】%s  Lv %d→%d" % [RAR_NAMES[rar], str(d["desc"]), _lv(d["id"]), _lv(d["id"]) + 1]
 			cd["icon"].text = str(d["short"])
 			cd["name"].text = str(d["name"])
 			btn.visible = true
@@ -583,6 +673,7 @@ func _offer_levelup() -> void:
 	var tw := create_tween()
 	tw.tween_interval(0.38)
 	tw.tween_callback(_unlock_cards)
+	return true
 
 
 func _unlock_cards() -> void:
@@ -612,12 +703,33 @@ func _on_card(i: int) -> void:
 			level_hint.text = "▶ もう一度タップで決定！"
 		return
 	# 2タップ目:確定
-	_apply_upgrade(str(_offered[i]["id"]))
-	sfx.play("powerup")
+	var d = _offered[i]
+	var is_uniq: bool = not d.has("req") and not d.has("max")
+	var is_special: bool = is_uniq or d.has("req")
+	var times: int = _offered_qty[i] if i < _offered_qty.size() else 1
+	for _k in times:
+		if d.has("max") and _lv(str(d["id"])) >= int(d["max"]):
+			break
+		_apply_upgrade(str(d["id"]))
 	_leveling = false
 	_selected_card = -1
 	level_box.visible = false
-	_floater("%s!" % str(_offered[i]["name"]), bird.position + Vector2(0, -60), Color(1, 0.9, 0.4), 32)
+	if is_special:
+		# ユニーク/進化は「やった！」演出
+		sfx.play("fever")
+		_hit_stop(0.12)
+		_flash(Color(1, 0.85, 0.3), 0.5)
+		shake = maxf(shake, 16.0)
+		_burst(bird.position, Color(1, 0.85, 0.3), 36, 320.0, 0.8, 5.0)
+		_floater("★ %s ★" % ("UNIQUE GET！" if is_uniq else "進化！"), Vector2(W * 0.5, H * 0.38), Color(1, 0.85, 0.3), 40)
+		_floater(str(d["name"]), Vector2(W * 0.5, H * 0.45), Color(1, 0.95, 0.5), 30)
+	else:
+		sfx.play("powerup")
+		_floater("%s!" % str(d["name"]), bird.position + Vector2(0, -60), Color(1, 0.9, 0.4), 32)
+	# ゲージ満タン由来なら、選択後にフィーバー開始
+	if _fever_pending:
+		_fever_pending = false
+		_start_fever()
 
 
 func _apply_upgrade(id: String) -> void:
@@ -629,11 +741,24 @@ func _apply_upgrade(id: String) -> void:
 		bird.shield = true
 	# サテライト子機を1機追加
 	if id == "satellite":
-		var s := Satellite.new()
-		s.ang = TAU * satellites.size() / 3.0
-		s.position = bird.position
-		world.add_child(s)
-		satellites.append(s)
+		_add_satellite()
+	# ユニーク:イージスの盾=即シールド
+	if id == "u_aegis":
+		shield = true
+		bird.shield = true
+	# ユニーク:サテライト群=一気に2機
+	if id == "u_swarm":
+		_add_satellite()
+		_add_satellite()
+
+
+func _add_satellite() -> void:
+	var s := Satellite.new()
+	s.ang = TAU * satellites.size() / 3.0
+	s.orbit = 54.0 + satellites.size() * 6.0
+	s.position = bird.position
+	world.add_child(s)
+	satellites.append(s)
 
 
 func _do_revive() -> void:
@@ -861,6 +986,7 @@ func _reset(to_title: bool) -> void:
 	# ローグライク強化をリセット
 	ups.clear()
 	_leveling = false
+	_fever_pending = false
 	_pipes_since_level = 0
 	_revive_count = 0
 	_regen_count = 0
@@ -1002,6 +1128,8 @@ func _update_play(delta: float) -> void:
 	var speed_mult := (1.12 if fever_active else 1.0) * (0.5 if slowmo_t > 0.0 else 1.0)
 	speed_mult *= 1.0 - _lv("slow") * 0.07  # スロー体質
 	speed_mult *= _biome_spd  # バイオームのスピード個性
+	if _u_hourglass:
+		speed_mult *= 0.85  # 時の砂時計
 	var dx := scroll_speed * delta * speed_mult
 	var pdelta := delta * speed_mult
 
@@ -1109,6 +1237,10 @@ func _spawn_pipe() -> void:
 		gap += 30.0  # フィーバー中は少し楽に
 	if not _pv:
 		gap += _biome_gap  # バイオームの隙間個性
+		if _u_greed:
+			gap -= 15.0  # 強欲の王冠(危険)
+		if _u_glass:
+			gap -= 20.0  # ガラスの大砲(危険)
 	if _pv:
 		gap = 235.0  # PVは見栄え優先で隙間を一定に
 	gap = clampf(gap, 150.0, 320.0)
@@ -1284,14 +1416,16 @@ func _check_pipes() -> void:
 			p.passed = true
 			pipes_passed += 1
 			_pipes_since_level += 1
-			# シールド再生(守りの心得)
+			# シールド再生(守りの心得 / イージスの盾)
 			_regen_count += 1
-			if _lv("shieldregen") > 0 and not shield and _regen_count >= 20 - _lv("shieldregen") * 4:
+			var regen_on := _lv("shieldregen") > 0 or _u_aegis
+			var regen_int := 8 if _u_aegis else 20 - _lv("shieldregen") * 4
+			if regen_on and not shield and _regen_count >= regen_int:
 				_regen_count = 0
 				shield = true
 				bird.shield = true
 				_floater("盾 再生", bird.position + Vector2(0, -50), Color(0.6, 0.9, 1), 26)
-			var pts := 2 if fever_active else 1
+			var pts := (2 if fever_active else 1) * (2 if _u_glass else 1)
 			score += pts
 			_add_fever(0.08)
 			sfx.play("score", 1.0 + minf(score, 25) * 0.008)
@@ -1300,7 +1434,7 @@ func _check_pipes() -> void:
 			var near_win := 30.0 + _lv("near") * 8.0
 			var near: float = min(absf(bird.position.y - p.gap_top()), absf(bird.position.y - p.gap_bottom()))
 			if near < near_win and bird.alive:
-				var nb := (2 + _lv("near")) * (2 if fever_active else 1)
+				var nb := (2 + _lv("near")) * (2 if fever_active else 1) * (2 if _u_glass else 1)
 				score += nb
 				_add_fever(0.07 * (1.0 + _lv("nearfever")))  # 際どい快感
 				shake = maxf(shake, 5.0)
@@ -1376,7 +1510,13 @@ func _collect_coin(c: Coin) -> void:
 	var fmult := 2 if fever_active else 1
 	var val := int(round(float(c.value) * mult)) * fmult
 	if fever_active and _lv("midas") > 0:
-		val *= 2  # ミダスタッチ
+		val *= 2  # ミダスタッチ(能力)
+	if _u_midas:
+		val *= 2  # ミダスの指輪(ユニーク)
+	if _u_greed:
+		val = int(round(val * 1.8))  # 強欲の王冠
+	if _u_glass:
+		val *= 2  # ガラスの大砲(スコア2倍)
 	if _evo_gold:
 		val = int(round(val * 1.5))  # 黄金旋風
 	score += val
@@ -1436,15 +1576,24 @@ func _collect_powerup(u: PowerUp) -> void:
 
 # ---------------------------------------------------------------- フィーバー
 func _add_fever(a: float) -> void:
-	if fever_active:
+	if fever_active or _fever_pending:
 		return
-	fever_gauge += a * (1.0 + _lv("fevergain") * 0.25)  # フィーバー体質
+	var mult := 1.0 + _lv("fevergain") * 0.25  # フィーバー体質
+	if _u_feverheart:
+		mult *= 2.0  # フィーバーの心臓
+	fever_gauge += a * mult
 	if fever_gauge >= 1.0:
-		_start_fever()
+		# ゲージ満タン:先にレベルアップを選ばせ、確定後にフィーバー(無敵)へ
+		fever_gauge = 1.0
+		_fever_pending = true
+		var opened := _offer_levelup()
+		if not opened and not _leveling:
+			_fever_pending = false
+			_start_fever()
 
 
 func _fever_dur() -> float:
-	return FEVER_DUR + _lv("feverdur")  # フィーバー長持ち
+	return FEVER_DUR + _lv("feverdur") + (4.0 if _u_feverheart else 0.0)
 
 
 func _start_fever() -> void:
@@ -1464,8 +1613,6 @@ func _end_fever() -> void:
 	fever_active = false
 	bird.fever = false
 	fever_gauge = 0.0
-	# フィーバー終了でレベルアップ抽選(本作のローグライク強化の起点)
-	_offer_levelup()
 
 
 # ---------------------------------------------------------------- 被弾・死亡
@@ -1602,6 +1749,9 @@ func _build_summary() -> Array:
 	for e in EVO_DEFS:
 		if _lv(e["id"]) > 0:
 			out.append({"short": e["short"], "lv": 1, "max": 1, "evo": true})
+	for u in UNIQUES:
+		if _lv(u["id"]) > 0:
+			out.append({"short": u["short"], "lv": 1, "max": 1, "evo": true})
 	return out
 
 

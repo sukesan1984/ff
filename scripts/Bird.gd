@@ -20,6 +20,7 @@ var base_color := Color(1.0, 0.82, 0.25)
 var fever := false
 var shield := false
 var magnet := false
+var deco := {}   # ビルドに応じた見た目(crown/helmet/cape/goggles/phoenix/gold/small)
 var _t := 0.0
 
 var _trail: Array = []    # 直近の位置履歴(global)
@@ -84,8 +85,24 @@ func _draw() -> void:
 			var gr := (RADIUS + 10.0 + k * 8.0) * gp
 			draw_circle(Vector2.ZERO, gr, Color.from_hsv(fposmod(_t * 1.5 + k * 0.12, 1.0), 0.8, 1.0, 0.18 - k * 0.04))
 
-	# --- 本体の色(フィーバーは虹) ---
+	# --- ビルドに応じた進化見た目 ---
+	var crown: int = int(deco.get("crown", 0))
+	var phoenix: bool = deco.get("phoenix", false)
+	var gold: bool = deco.get("gold", false)
+
+	# 不死鳥の炎(本体の後ろ)
+	if phoenix:
+		for k in 5:
+			var fa := _t * 4.0 + k * 1.25
+			var fr := RADIUS + 6.0 + sin(_t * 8.0 + k) * 4.0
+			draw_circle(Vector2(cos(fa), sin(fa)) * fr, 5.0, Color(1.0, 0.45 + 0.3 * sin(fa), 0.1, 0.5))
+
+	# --- 本体の色(フィーバーは虹、金運で金色化) ---
 	var body_col := base_color
+	if crown > 0:
+		body_col = body_col.lerp(Color(1.0, 0.84, 0.2), minf(crown * 0.18, 0.6))
+	if gold:
+		body_col = Color(1.0, 0.8, 0.15)
 	if fever:
 		body_col = Color.from_hsv(fposmod(_t * 1.2, 1.0), 0.7, 1.0)
 
@@ -95,6 +112,17 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, RADIUS, body_col)
 	# お腹(明るい部分)
 	draw_circle(_rot(Vector2(2, 5)), RADIUS * 0.62, body_col.lightened(0.35))
+
+	# マント(羽のように)
+	var cape: int = int(deco.get("cape", 0))
+	if cape > 0:
+		var cw := 10.0 + cape * 3.0
+		var sway := sin(_t * 6.0 + wing) * 4.0
+		var c0 := _rot(Vector2(-RADIUS + 2, -8))
+		var c1 := _rot(Vector2(-RADIUS - cw, -2 + sway))
+		var c2 := _rot(Vector2(-RADIUS - cw + 3, 12 + sway))
+		var c3 := _rot(Vector2(-RADIUS + 2, 10))
+		draw_colored_polygon(PackedVector2Array([c0, c1, c2, c3]), Color(0.85, 0.2, 0.3, 0.9))
 
 	# 羽(羽ばたき)
 	var flap_y := sin(wing) * 7.0
@@ -107,11 +135,32 @@ func _draw() -> void:
 	var b2 := bk + _rot(Vector2(14, 5))
 	draw_colored_polygon(PackedVector2Array([bk, b1, b2]), Color(1.0, 0.55, 0.1))
 
-	# 目(白目 + 黒目)
+	# 目(白目 + 黒目)。ゴーグル(子機)装備時はゴーグル
 	var eye := _rot(Vector2(8, -6))
-	draw_circle(eye, 6.5, Color.WHITE)
-	draw_circle(eye + _rot(Vector2(2, 0)), 3.2, Color(0.1, 0.1, 0.12))
-	draw_circle(eye + _rot(Vector2(0.6, -1.6)), 1.2, Color.WHITE)
+	if deco.get("goggles", false):
+		draw_circle(eye, 7.0, Color(0.2, 0.9, 1.0))
+		draw_circle(eye, 4.5, Color(0.05, 0.1, 0.15))
+		draw_circle(eye + _rot(Vector2(-1.5, -1.5)), 1.6, Color(0.7, 1, 1, 0.9))
+	else:
+		draw_circle(eye, 6.5, Color.WHITE)
+		draw_circle(eye + _rot(Vector2(2, 0)), 3.2, Color(0.1, 0.1, 0.12))
+		draw_circle(eye + _rot(Vector2(0.6, -1.6)), 1.2, Color.WHITE)
+
+	# 兜(守りの心得)
+	if deco.get("helmet", false):
+		var hc := _rot(Vector2(-1, -RADIUS + 2))
+		_draw_ellipse(hc, RADIUS * 0.9, RADIUS * 0.55, angle, Color(0.6, 0.65, 0.72))
+		draw_arc(_rot(Vector2(0, -2)), RADIUS + 1.0, angle + PI + 0.2, angle + TAU - 0.2, 20, Color(0.5, 0.55, 0.62), 3.0)
+
+	# 王冠(金運)
+	if crown > 0:
+		var cy := -RADIUS - 4.0
+		var cc := Color(1.0, 0.85, 0.2)
+		var cp := PackedVector2Array([
+			_rot(Vector2(-9, cy + 8)), _rot(Vector2(-9, cy)), _rot(Vector2(-4.5, cy + 5)),
+			_rot(Vector2(0, cy - 3)), _rot(Vector2(4.5, cy + 5)), _rot(Vector2(9, cy)),
+			_rot(Vector2(9, cy + 8))])
+		draw_colored_polygon(cp, cc)
 
 	# --- シールドのリング ---
 	if shield:
