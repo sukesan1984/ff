@@ -185,6 +185,9 @@ var flash_rect: ColorRect
 var _ms_idx := 0
 var _beat_best := false
 const MILESTONES := [100, 250, 500, 1000, 2000, 4000, 7000, 10000, 15000, 20000]
+var _boss: Boss
+var _boss_active := false
+var _next_boss_at := 40
 var current_biome := -1
 var tint_rect: ColorRect
 var _biome_grav := 1.0
@@ -1172,6 +1175,11 @@ func _reset(to_title: bool) -> void:
 	for g in goblins:
 		g.queue_free()
 	goblins.clear()
+	_boss_active = false
+	if _boss:
+		_boss.queue_free()
+		_boss = null
+	_next_boss_at = 3 if OS.has_environment("FF_BOSS") else 40
 	if level_box:
 		level_box.visible = false
 	_recompute_passives()
@@ -1336,11 +1344,23 @@ func _update_play(delta: float) -> void:
 		_on_hit(true)
 		return
 
-	# 生成
-	spawn_countdown -= dx
-	if spawn_countdown <= 0.0:
-		spawn_countdown += SPACING
-		_spawn_pipe()
+	# ボス処理(出現中はパイプを止めて回避アリーナに)
+	if _boss_active:
+		_boss.tick(delta)
+		if _boss.lethal() and not (fever_active or invuln_t > 0.0) and _boss.in_band(bird.position.y):
+			_on_hit(false)
+			return
+		if _boss.done():
+			_defeat_boss()
+	elif not _pv and pipes_passed >= _next_boss_at:
+		_start_boss()
+
+	# 生成(ボス中はパイプを出さない)
+	if not _boss_active:
+		spawn_countdown -= dx
+		if spawn_countdown <= 0.0:
+			spawn_countdown += SPACING
+			_spawn_pipe()
 
 	# 障害物の移動・更新
 	for p in pipes:
@@ -1730,6 +1750,54 @@ func _catch_goblin(g: Goblin) -> void:
 	_burst(g.position, Color(1, 0.85, 0.3), 32, 300.0, 0.8, 4.5)
 	_floater("ゴブリン捕獲！ +%d" % reward, g.position + Vector2(0, -52), Color(1, 0.85, 0.3), 34)
 	g.queue_free()
+
+
+func _start_boss() -> void:
+	_boss_active = true
+	_boss = Boss.new()
+	_boss.W = W
+	_boss.H = H
+	_boss.ground_y = GROUND_Y
+	_boss.attacks_left = 6
+	world.add_child(_boss)
+	sfx.play("fever")
+	_flash(Color(0.7, 0.1, 0.1), 0.45)
+	shake = maxf(shake, 16.0)
+	_floater("ボス出現！", Vector2(W * 0.5, H * 0.4), Color(1, 0.4, 0.3), 46)
+	_floater("レーザーを避けろ！", Vector2(W * 0.5, H * 0.47), Color(1, 1, 1), 24)
+
+
+func _defeat_boss() -> void:
+	_boss_active = false
+	if _boss:
+		_boss.queue_free()
+		_boss = null
+	_next_boss_at = pipes_passed + 45
+	score += 200 + pipes_passed * 2
+	_add_fever(0.5)
+	sfx.play("fever")
+	_hit_stop(0.12)
+	_flash(Color(1, 0.9, 0.4), 0.5)
+	shake = maxf(shake, 18.0)
+	_burst(bird.position, Color(1, 0.85, 0.3), 40, 320.0, 0.9, 5.0)
+	_floater("ボス撃破！", Vector2(W * 0.5, H * 0.4), Color(1, 0.9, 0.3), 46)
+	_grant_random_unique()
+
+
+func _grant_random_unique() -> void:
+	var pool: Array = []
+	for u in UNIQUES:
+		if _lv(u["id"]) == 0:
+			pool.append(u)
+	if pool.is_empty():
+		score += 300  # 全ユニーク所持済みなら大量スコア
+		_floater("+300 (全ユニーク所持)", Vector2(W * 0.5, H * 0.48), Color(1, 0.9, 0.4), 30)
+		return
+	pool.shuffle()
+	var u = pool[0]
+	_apply_upgrade(str(u["id"]))
+	_floater("★ UNIQUE GET！ ★", Vector2(W * 0.5, H * 0.48), Color(1, 0.85, 0.3), 36)
+	_floater(str(u["name"]), Vector2(W * 0.5, H * 0.54), Color(1, 0.95, 0.5), 28)
 
 
 func _spawn_goblin() -> void:
