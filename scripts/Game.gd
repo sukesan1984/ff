@@ -31,6 +31,7 @@ var over_score: Label
 var over_best: Label
 var over_medal: Label
 var over_new: Label
+var over_souls: Label
 
 # メタ進行(魂の祭壇)
 var souls := 0
@@ -545,13 +546,14 @@ func _build_over() -> void:
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	over_box.add_child(panel)
 	_mk_label(over_box, "ゲームオーバー", 326, 50, Color(1, 0.4, 0.35))
-	over_medal = _mk_label(over_box, "", 470, 30, Color(1, 1, 1))
-	over_score = _mk_label(over_box, "スコア 0", 510, 34, Color.WHITE)
-	over_best = _mk_label(over_box, "ベスト 0", 552, 26, Color(1, 1, 0.6))
-	over_new = _mk_label(over_box, "★ 自己ベスト更新！ ★", 588, 24, Color(0.4, 1, 0.5))
+	over_medal = _mk_label(over_box, "", 466, 28, Color(1, 1, 1))
+	over_score = _mk_label(over_box, "スコア 0", 502, 34, Color.WHITE)
+	over_best = _mk_label(over_box, "ベスト 0", 542, 24, Color(1, 1, 0.6))
+	over_souls = _mk_label(over_box, "", 574, 22, Color(0.8, 0.7, 1.0))
+	over_new = _mk_label(over_box, "★ 自己ベスト更新！ ★", 604, 22, Color(0.4, 1, 0.5))
 	over_new.visible = false
-	_mk_button(over_box, "ランキングを見る", Vector2(W * 0.5 - 110, 624), Vector2(220, 50), _open_ranking)
-	_mk_label(over_box, "タップでリトライ", 706, 26, Color.WHITE)
+	_mk_button(over_box, "ランキングを見る", Vector2(W * 0.5 - 110, 640), Vector2(220, 48), _open_ranking)
+	_mk_label(over_box, "タップでリトライ", 712, 26, Color.WHITE)
 	over_box.visible = false
 
 
@@ -1985,7 +1987,8 @@ func _die() -> void:
 	_burst(bird.position, Color.WHITE, 16, 200.0, 0.6, 3.0)
 
 	# ソウル獲得(メタ進行)
-	souls += int(floor(score / 20.0 * (1.0 + int(meta.get("m_soul", 0)) * 0.25)))
+	var earned := int(floor(score / 20.0 * (1.0 + int(meta.get("m_soul", 0)) * 0.25)))
+	souls += earned
 	var new_best := false
 	if score > best:
 		best = score
@@ -1996,6 +1999,7 @@ func _die() -> void:
 	over_score.text = "スコア  %d" % score
 	over_best.text = "ベスト  %d" % best
 	over_new.visible = new_best
+	over_souls.text = "魂 +%d  (所持 %d)" % [earned, souls]
 	var m := _medal(score)
 	over_medal.text = ["", "ブロンズメダル", "シルバーメダル", "ゴールドメダル", "プラチナメダル"][m]
 	over_medal.add_theme_color_override("font_color", Hud.MEDAL_COLS[m])
