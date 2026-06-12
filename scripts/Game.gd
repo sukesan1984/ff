@@ -666,16 +666,9 @@ func _craft_update(delta: float, dx: float) -> void:
 	# 溶岩/硬い壁に当たった → ハートを1つ失う(マグマブーツ装備時は溶岩無効)
 	var deadly: bool = result["dead"] or (result["lava"] and craft_magma == 0)
 	if deadly and invuln_t <= 0.0 and not fever_active:
-		craft_hp -= 1
-		invuln_t = 1.1
-		bird.velocity = -380.0
-		shake = maxf(shake, 12.0)
-		sfx.play("hit")
-		_flash(Color(0.9, 0.15, 0.15), 0.4)
-		if craft_hp <= 0:
-			_on_hit(true)
+		_craft_take_damage("溶岩！" if result["lava"] else "硬い壁！")
+		if state != PLAY:
 			return
-		_floater("ハート -1 (残り%d)" % craft_hp, bird.position + Vector2(0, -50), Color(1, 0.4, 0.4), 26)
 	for t in result["types"]:
 		mined_count += 1
 		var gain := 0
@@ -762,15 +755,15 @@ func _creeper_explode(m: Mob) -> void:
 
 func _craft_take_damage(msg: String) -> void:
 	craft_hp -= 1
-	invuln_t = 1.1
-	bird.velocity = -360.0
 	shake = maxf(shake, 12.0)
 	sfx.play("hit")
 	_flash(Color(0.9, 0.15, 0.15), 0.4)
 	if craft_hp <= 0:
-		_on_hit(true)
-	else:
-		_floater("%s ハート-1(残り%d)" % [msg, craft_hp], bird.position + Vector2(0, -52), Color(1, 0.4, 0.4), 24)
+		_die()   # ハート尽きたら確実に死亡(無敵判定を経由しない)
+		return
+	invuln_t = 1.1
+	bird.velocity = -360.0
+	_floater("%s ハート-1(残り%d)" % [msg, craft_hp], bird.position + Vector2(0, -52), Color(1, 0.4, 0.4), 24)
 
 
 func _start_daily() -> void:
