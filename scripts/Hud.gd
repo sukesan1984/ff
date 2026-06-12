@@ -17,6 +17,8 @@ var magnet_t := 0.0
 var show_medal := false
 var medal := 0  # 0=none,1=bronze,2=silver,3=gold,4=platinum
 var build_list: Array = []  # 所持アビリティ [{short,lv,max,evo}]
+var hearts := -1  # クラフトモードのハート数(-1=非表示)
+var hearts_max := 3
 
 const MEDAL_COLS := [
 	Color(0.5, 0.5, 0.5),
@@ -46,6 +48,8 @@ func _draw() -> void:
 	_draw_fever_bar()
 	_draw_powerups()
 	_draw_build()
+	if hearts >= 0:
+		_draw_hearts()
 	if show_medal:
 		_draw_medal(Vector2(W * 0.5, H * 0.5 - 70), 46, medal)
 
@@ -65,6 +69,23 @@ func _draw_fever_border() -> void:
 		var c2 := Color.from_hsv(hue2, 0.85, 1.0, 0.5)
 		draw_rect(Rect2(0, H * i / seg, thick, H / seg + 1), c2)
 		draw_rect(Rect2(W - thick, H * i / seg, thick, H / seg + 1), c2)
+
+
+func _draw_heart(c: Vector2, r: float, col: Color) -> void:
+	draw_circle(c + Vector2(-r * 0.5, -r * 0.35), r * 0.55, col)
+	draw_circle(c + Vector2(r * 0.5, -r * 0.35), r * 0.55, col)
+	draw_colored_polygon(PackedVector2Array([
+		c + Vector2(-r, -r * 0.1), c + Vector2(r, -r * 0.1), c + Vector2(0, r)]), col)
+
+
+func _draw_hearts() -> void:
+	var x := 18.0
+	var y := 170.0
+	for i in hearts_max:
+		var c := Vector2(x + i * 38.0, y)
+		_draw_heart(c, 13.0, Color(0, 0, 0, 0.3))
+		var col := Color(0.95, 0.2, 0.25) if i < hearts else Color(0.3, 0.3, 0.34)
+		_draw_heart(c, 11.0, col)
 
 
 func _draw_build() -> void:

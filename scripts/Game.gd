@@ -45,6 +45,8 @@ var craft_armor := 0    # よろい(被弾を肩代わり)
 var craft_wings := 0    # つばさ(重力減)
 var craft_depth := 0    # 到達深度(m)
 var _craft_ore := 0     # 鉱石ボーナス累計
+var craft_hp := 3       # ハート(マイクラの心臓)
+var craft_hp_max := 3
 
 const CRAFT_DEFS := [
 	{"id": "c_pick", "name": "ツルハシ強化", "short": "鶴", "desc": "硬い扉を掘れる(進行に必須)"},
@@ -632,23 +634,30 @@ func _start_craft() -> void:
 
 
 func _craft_update(delta: float, dx: float) -> void:
+	blocks.view_pick = craft_pick
 	blocks.tick(dx)
 	# 深度(進んだ距離=メートル)。これが主目的・スコアの柱
 	craft_depth = int(run_dist / 12.0)
 	# 採掘(ツルハシLvで掘れる硬さが決まる)
 	var mr := cur_radius + 7.0
 	var result := blocks.mine(bird.position, mr, craft_pick)
-	if result["dead"] and not (fever_active or invuln_t > 0.0):
-		if craft_armor > 0:
-			craft_armor -= 1
-			invuln_t = 1.0
-			bird.velocity = -360.0
-			sfx.play("shield")
-			_flash(Color(0.6, 0.8, 1.0), 0.35)
-			_floater("よろいが守った！", bird.position + Vector2(0, -50), Color(0.6, 0.9, 1), 28)
-		else:
-			_on_hit(false)
+	if result["boom"]:
+		sfx.play("crash")
+		_hit_stop(0.05)
+		shake = maxf(shake, 9.0)
+		_burst(bird.position, Color(1, 0.7, 0.2), 24, 280.0, 0.6, 4.0)
+	# 溶岩/硬い壁に当たった → ハートを1つ失う(即死ではない)
+	if result["dead"] and invuln_t <= 0.0 and not fever_active:
+		craft_hp -= 1
+		invuln_t = 1.1
+		bird.velocity = -380.0
+		shake = maxf(shake, 12.0)
+		sfx.play("hit")
+		_flash(Color(0.9, 0.15, 0.15), 0.4)
+		if craft_hp <= 0:
+			_on_hit(true)
 			return
+		_floater("ハート -1 (残り%d)" % craft_hp, bird.position + Vector2(0, -50), Color(1, 0.4, 0.4), 26)
 	for t in result["types"]:
 		mined_count += 1
 		var gain := 0
@@ -1018,7 +1027,9 @@ func _do_craft(id: String) -> void:
 			_floater("ツルハシ強化！(%sのツルハシ)" % ["", "石", "鉄", "ダイヤ"][clampi(craft_pick, 0, 3)], Vector2(W * 0.5, H * 0.42), Color(0.7, 0.9, 1), 30)
 		"c_armor":
 			craft_armor += 1
-			_floater("よろい装備！", Vector2(W * 0.5, H * 0.42), Color(0.7, 0.9, 1), 30)
+			craft_hp_max += 1
+			craft_hp = craft_hp_max  # 最大ハート+1＆全回復
+			_floater("よろい！ハート最大+1＆回復", Vector2(W * 0.5, H * 0.42), Color(0.7, 0.9, 1), 28)
 		"c_wings":
 			craft_wings += 1
 			_recompute_passives()
@@ -1536,6 +1547,8 @@ func _reset(to_title: bool) -> void:
 	craft_wings = 0
 	craft_depth = 0
 	_craft_ore = 0
+	craft_hp = 3
+	craft_hp_max = 3
 	if res_label:
 		res_label.visible = craft_mode and not to_title
 	if craft_mode and not to_title:
@@ -2591,6 +2604,8 @@ func _update_hud() -> void:
 	hud.slowmo_t = slowmo_t
 	hud.magnet_t = magnet_t
 	hud.build_list = _build_summary()
+	hud.hearts = craft_hp if craft_mode else -1
+	hud.hearts_max = craft_hp_max
 
 
 func _build_summary() -> Array:
