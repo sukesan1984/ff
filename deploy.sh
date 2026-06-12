@@ -28,7 +28,8 @@ rm -rf build/web && mkdir -p build/web
 echo "== build/push/deploy ($TAG) =="
 docker build --platform linux/amd64 -t "$IMG" . >/dev/null
 docker push "$IMG" >/dev/null
+# --update-env-vars: 既存の環境変数(HMAC_SECRET等)を消さずにマージする
 "$GC" run deploy flappy-fever --image "$IMG" --region "$REGION" --allow-unauthenticated \
   --port 8080 --memory 256Mi --cpu 1 --min-instances 0 --max-instances 3 --concurrency 80 \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJ" --quiet 2>&1 | tail -2
+  --update-env-vars "GOOGLE_CLOUD_PROJECT=$PROJ" --quiet 2>&1 | tail -2
 echo "== DONE $TAG =="

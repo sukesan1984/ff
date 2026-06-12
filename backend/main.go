@@ -4,6 +4,10 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"mime"
@@ -11,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,12 +29,16 @@ const (
 	collection = "scores"
 	topN       = 10
 	maxName    = 12
-	maxScore   = 1000000
+	maxScore   = 200000 // 現実的な上限
+	// スコアの稼ぎ速度の上限(points/秒)。実プレイの最大瞬間値より十分高く、
+	// 「数秒で数万点」のような偽投稿だけを弾く
+	maxPtsPerSec = 150
 )
 
 var (
-	fsClient  *firestore.Client
-	staticDir = envOr("STATIC_DIR", "/web")
+	fsClient   *firestore.Client
+	staticDir  = envOr("STATIC_DIR", "/web")
+	hmacSecret []byte
 )
 
 type scoreEntry struct {
@@ -37,7 +46,54 @@ type scoreEntry struct {
 	Score int    `firestore:"score" json:"score"`
 }
 
+// ---------------------------------------------------------------- ランタイムトークン
+// ラン開始時に発行するHMAC署名付きトークン。送信時に「経過時間 vs スコア」の
+// 整合を検証し、curl等での即席偽スコアを弾く(完全防御ではなく敷居上げ)。
+
+func initSecret() {
+	if s := os.Getenv("HMAC_SECRET"); s != "" {
+		hmacSecret = []byte(s)
+		return
+	}
+	hmacSecret = make([]byte, 32)
+	if _, err := rand.Read(hmacSecret); err != nil {
+		log.Fatalf("secret: %v", err)
+	}
+	log.Printf("WARN: HMAC_SECRET 未設定。ランダム秘密鍵を使用(複数インスタンスでトークン検証が失敗し得ます)")
+}
+
+func signTS(ts string) string {
+	mac := hmac.New(sha256.New, hmacSecret)
+	mac.Write([]byte(ts))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func issueToken() string {
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	return ts + "." + signTS(ts)
+}
+
+func validToken(tok string, score int) bool {
+	parts := strings.SplitN(tok, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	if !hmac.Equal([]byte(signTS(parts[0])), []byte(parts[1])) {
+		return false
+	}
+	ts, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return false
+	}
+	age := time.Now().Unix() - ts
+	if age < 0 || age > 6*3600 {
+		return false // 未来 or 6時間超は無効
+	}
+	return age >= int64(score/maxPtsPerSec) // スコアに見合う経過時間が必要
+}
+
 func main() {
+	initSecret()
 	ctx := context.Background()
 	var err error
 	fsClient, err = firestore.NewClient(ctx, firestore.DetectProjectID)
@@ -53,6 +109,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/scores", handleScores)
 	mux.HandleFunc("/api/daily", handleDaily)
+	mux.HandleFunc("/api/run-token", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"token": issueToken()})
+	})
 	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("/", serveStatic)
 
@@ -104,14 +163,22 @@ func handleScores(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited"})
 			return
 		}
-		var body scoreEntry
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+		var body struct {
+			Name  string `json:"name"`
+			Score int    `json:"score"`
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 			return
 		}
 		name := sanitizeName(body.Name)
 		if body.Score < 0 || body.Score > maxScore {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid score"})
+			return
+		}
+		if !validToken(body.Token, body.Score) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid token"})
 			return
 		}
 		_, _, err := fsClient.Collection(collection).Add(r.Context(), scoreEntry{Name: name, Score: body.Score})
@@ -144,6 +211,7 @@ type dailyPost struct {
 	Name  string `json:"name"`
 	Score int    `json:"score"`
 	Path  string `json:"path"`
+	Token string `json:"token"`
 }
 
 func dailyDay() string {
@@ -203,6 +271,10 @@ func handleDaily(w http.ResponseWriter, r *http.Request) {
 		name := sanitizeName(body.Name)
 		if body.Score < 0 || body.Score > maxScore || len(body.Path) > maxPath {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+			return
+		}
+		if !validToken(body.Token, body.Score) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid token"})
 			return
 		}
 		ctx := r.Context()

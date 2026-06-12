@@ -73,6 +73,7 @@ var title_rank: VBoxContainer
 var _modal := false
 var _player_name := ""
 var _last_scores: Array = []
+var _run_token := ""   # ラン開始時にサーバから取得(スコア送信に必須)
 
 # ローグライク(レベルアップ強化。フィーバー終了で1枚選ぶ)
 var ups := {}                  # id -> 取得数
@@ -639,11 +640,25 @@ func _submit_daily(pname: String, sc: int, path: String, cb: Callable) -> void:
 				data = j
 		h.queue_free()
 		cb.call(data))
-	var payload := JSON.stringify({"name": pname, "score": sc, "path": path})
+	var payload := JSON.stringify({"name": pname, "score": sc, "path": path, "token": _run_token})
 	var err := h.request(_api_base() + "/api/daily", ["Content-Type: application/json"], HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		h.queue_free()
 		cb.call({})
+
+
+func _fetch_run_token() -> void:
+	_run_token = ""
+	var h := HTTPRequest.new()
+	add_child(h)
+	h.request_completed.connect(func(_r, code, _hd, body):
+		if code == 200:
+			var j = JSON.parse_string(body.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY and j.has("token"):
+				_run_token = str(j["token"])
+		h.queue_free())
+	if h.request(_api_base() + "/api/run-token") != OK:
+		h.queue_free()
 
 
 func _ghost_path_string() -> String:
@@ -1140,7 +1155,7 @@ func _submit_score(pname: String, sc: int, cb: Callable) -> void:
 		_last_scores = arr
 		h.queue_free()
 		cb.call(arr))
-	var payload := JSON.stringify({"name": pname, "score": sc})
+	var payload := JSON.stringify({"name": pname, "score": sc, "token": _run_token})
 	var err := h.request(_api_base() + "/api/scores", ["Content-Type: application/json"], HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		h.queue_free()
@@ -1383,6 +1398,7 @@ func _reset(to_title: bool) -> void:
 		state = TITLE
 		title_box.visible = true
 	else:
+		_fetch_run_token()  # ラン開始時にスコア送信用トークンを取得
 		# メタ進行(祭壇)の永続強化を開始時に反映
 		if int(meta.get("m_coin", 0)) > 0:
 			ups["coin"] = int(meta["m_coin"])
