@@ -40,6 +40,17 @@ var blocks: Blocks
 var res := {"d": 0, "s": 0, "i": 0, "g": 0}  # 土/石/鉄+金/ダイヤ
 var res_label: Label
 var mined_count := 0
+var craft_pick := 1     # ツルハシLv(1=石,2=鉄,3=ダイヤ)
+var craft_armor := 0    # よろい(被弾を肩代わり)
+var craft_wings := 0    # つばさ(重力減)
+var craft_depth := 0    # 到達深度(m)
+var _craft_ore := 0     # 鉱石ボーナス累計
+
+const CRAFT_DEFS := [
+	{"id": "c_pick", "name": "ツルハシ強化", "short": "鶴", "desc": "硬い扉を掘れる(進行に必須)"},
+	{"id": "c_armor", "name": "よろい", "short": "鎧", "desc": "溶岩/衝突を1回だけ肩代わり"},
+	{"id": "c_wings", "name": "つばさ", "short": "翼", "desc": "落下が遅く操作しやすい"},
+]
 
 # デイリー挑戦(全員同じシード世界 + 王者ゴースト並走)
 var daily := false
@@ -622,39 +633,45 @@ func _start_craft() -> void:
 
 func _craft_update(delta: float, dx: float) -> void:
 	blocks.tick(dx)
-	# 鳥が触れたブロックを採掘
-	var mr := cur_radius + 8.0
-	var result := blocks.mine(bird.position, mr)
-	if result["lava"] and not (fever_active or invuln_t > 0.0):
-		_on_hit(false)
-		return
+	# 深度(進んだ距離=メートル)。これが主目的・スコアの柱
+	craft_depth = int(run_dist / 12.0)
+	# 採掘(ツルハシLvで掘れる硬さが決まる)
+	var mr := cur_radius + 7.0
+	var result := blocks.mine(bird.position, mr, craft_pick)
+	if result["dead"] and not (fever_active or invuln_t > 0.0):
+		if craft_armor > 0:
+			craft_armor -= 1
+			invuln_t = 1.0
+			bird.velocity = -360.0
+			sfx.play("shield")
+			_flash(Color(0.6, 0.8, 1.0), 0.35)
+			_floater("よろいが守った！", bird.position + Vector2(0, -50), Color(0.6, 0.9, 1), 28)
+		else:
+			_on_hit(false)
+			return
 	for t in result["types"]:
 		mined_count += 1
-		var gain := 1
+		var gain := 0
 		match t:
-			Blocks.DIRT:
-				res["d"] += 1
-				gain = 1
-			Blocks.STONE:
-				res["s"] += 1
-				gain = 2
 			Blocks.IRON:
 				res["i"] += 1
-				gain = 6
+				gain = 4
 				sfx.play("coin", 1.1)
 			Blocks.GOLD:
 				res["i"] += 2
-				gain = 12
+				gain = 8
 				sfx.play("coin", 0.95)
 			Blocks.DIAMOND:
 				res["g"] += 1
-				gain = 25
+				gain = 20
 				sfx.play("powerup", 1.2)
 				_burst(bird.position, Color(0.5, 0.9, 1.0), 10, 150.0, 0.4, 2.5)
-				_floater("ダイヤ！ +25", bird.position + Vector2(0, -42), Color(0.5, 0.95, 1.0), 26)
-		score += gain
-		_add_fever(0.012 if t == Blocks.DIRT else 0.02)
-	res_label.text = "土%d 石%d 鉄%d ◆%d" % [res["d"], res["s"], res["i"], res["g"]]
+				_floater("ダイヤ！", bird.position + Vector2(0, -42), Color(0.5, 0.95, 1.0), 26)
+		_craft_ore += gain
+		_add_fever(0.07)
+	score = craft_depth + _craft_ore
+	var pk: String = ["", "石", "鉄", "ダイヤ"][clampi(craft_pick, 0, 3)]
+	res_label.text = "深度 %dm   鉄%d ◆%d   %sのツルハシ" % [craft_depth, res["i"], res["g"], pk]
 
 
 func _start_daily() -> void:
@@ -931,8 +948,8 @@ func _recompute_passives() -> void:
 	_evo_engine = _lv("evo_engine") > 0
 	_evo_greed = _lv("evo_greed") > 0
 	if bird:
-		bird.gravity_mult = (1.0 - _lv("float") * 0.07) * _biome_grav * (0.7 if _u_cloak else 1.0)
-		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0 - (260.0 if _u_cloak else 0.0)
+		bird.gravity_mult = (1.0 - _lv("float") * 0.07) * _biome_grav * (0.7 if _u_cloak else 1.0) * (1.0 - craft_wings * 0.08)
+		bird.max_fall = Bird.MAX_FALL - _lv("featherfall") * 90.0 - (260.0 if _u_cloak else 0.0) - craft_wings * 60.0
 		# ビルドに応じた見た目(装備が姿に出る)
 		bird.deco = {
 			"small": _lv("small"),
@@ -967,7 +984,104 @@ func remain_to_max(d: Dictionary) -> int:
 	return int(d["max"]) - _lv(str(d["id"]))
 
 
+func _craft_cost(id: String) -> Dictionary:
+	match id:
+		"c_pick":
+			return {"i": 5, "g": 0} if craft_pick <= 1 else {"i": 12, "g": 3}
+		"c_armor":
+			return {"i": 4 + craft_armor * 3, "g": 0}
+		"c_wings":
+			return {"i": 3 + craft_wings * 2, "g": 0}
+	return {"i": 0, "g": 0}
+
+
+func _craft_maxed(id: String) -> bool:
+	if id == "c_pick":
+		return craft_pick >= 3
+	if id == "c_wings":
+		return craft_wings >= 4
+	return false
+
+
+func _craft_afford(id: String) -> bool:
+	var c := _craft_cost(id)
+	return res["i"] >= int(c["i"]) and res["g"] >= int(c["g"])
+
+
+func _do_craft(id: String) -> void:
+	var c := _craft_cost(id)
+	res["i"] -= int(c["i"])
+	res["g"] -= int(c["g"])
+	match id:
+		"c_pick":
+			craft_pick += 1
+			_floater("ツルハシ強化！(%sのツルハシ)" % ["", "石", "鉄", "ダイヤ"][clampi(craft_pick, 0, 3)], Vector2(W * 0.5, H * 0.42), Color(0.7, 0.9, 1), 30)
+		"c_armor":
+			craft_armor += 1
+			_floater("よろい装備！", Vector2(W * 0.5, H * 0.42), Color(0.7, 0.9, 1), 30)
+		"c_wings":
+			craft_wings += 1
+			_recompute_passives()
+			_floater("つばさ強化！", Vector2(W * 0.5, H * 0.42), Color(0.7, 0.9, 1), 30)
+	sfx.play("powerup")
+	_hit_stop(0.06)
+
+
+func _offer_craft() -> bool:
+	if _leveling or state != PLAY:
+		return false
+	_offered = []
+	_offered_qty = []
+	_offered_rar = []
+	for d in CRAFT_DEFS:
+		_offered.append(d)
+		_offered_qty.append(1)
+		_offered_rar.append(3)
+	for i in level_cards.size():
+		var cd = level_cards[i]
+		var btn: Button = cd["btn"]
+		if i < CRAFT_DEFS.size():
+			var d = CRAFT_DEFS[i]
+			var cid := str(d["id"])
+			var maxed := _craft_maxed(cid)
+			var afford := _craft_afford(cid)
+			var c := _craft_cost(cid)
+			var costs := "%s%s" % [("鉄%d " % int(c["i"]) if int(c["i"]) > 0 else ""), ("◆%d" % int(c["g"]) if int(c["g"]) > 0 else "")]
+			var sb: StyleBoxFlat = cd["sb"]
+			var col := Color(0.55, 0.8, 1.0) if (afford and not maxed) else Color(0.5, 0.5, 0.55)
+			sb.bg_color = Color(0.1, 0.16, 0.24, 0.96)
+			sb.border_color = col
+			sb.set_border_width_all(3)
+			cd["icon"].add_theme_color_override("font_color", col)
+			cd["name"].add_theme_color_override("font_color", col.lightened(0.3))
+			if maxed:
+				cd["desc"].text = "%s  【MAX】" % str(d["desc"])
+			else:
+				cd["desc"].text = "%s\nコスト: %s" % [str(d["desc"]), costs]
+			cd["icon"].text = str(d["short"])
+			cd["name"].text = str(d["name"])
+			btn.visible = true
+		else:
+			btn.visible = false
+	_leveling = true
+	_selected_card = -1
+	if level_hint:
+		level_hint.text = "作るものを選ぶ(鉱石を消費)"
+	level_box.visible = true
+	sfx.play("powerup", 1.2)
+	_level_lock = true
+	for cd in level_cards:
+		cd["btn"].disabled = true
+		cd["btn"].modulate = Color(1, 1, 1, 0.35)
+	var tw := create_tween()
+	tw.tween_interval(0.38)
+	tw.tween_callback(_unlock_cards)
+	return true
+
+
 func _offer_levelup() -> bool:
+	if craft_mode:
+		return _offer_craft()
 	if _leveling or state != PLAY or _pv:
 		return false
 	# 進化(条件を満たし未取得)を最優先で出す
@@ -1101,6 +1215,24 @@ func _on_card(i: int) -> void:
 		return
 	# 2タップ目:確定
 	var d = _offered[i]
+	# クラフトモード:鉱石を払って装備を作る
+	if craft_mode:
+		var cid := str(d["id"])
+		if _craft_maxed(cid):
+			sfx.play("hit", 0.8)
+			_floater("もう最大！", bird.position + Vector2(0, -50), Color(1, 0.5, 0.5), 24)
+			_selected_card = -1
+			return
+		if not _craft_afford(cid):
+			sfx.play("hit", 0.8)
+			_floater("資源が足りない", bird.position + Vector2(0, -50), Color(1, 0.5, 0.5), 24)
+			_selected_card = -1
+			return
+		_do_craft(cid)
+		_leveling = false
+		_selected_card = -1
+		level_box.visible = false
+		return
 	var is_deal: bool = d.has("deal")
 	var is_uniq: bool = not d.has("req") and not d.has("max") and not is_deal
 	var is_special: bool = is_uniq or d.has("req")
@@ -1399,6 +1531,11 @@ func _reset(to_title: bool) -> void:
 		blocks = null
 	res = {"d": 0, "s": 0, "i": 0, "g": 0}
 	mined_count = 0
+	craft_pick = 1
+	craft_armor = 0
+	craft_wings = 0
+	craft_depth = 0
+	_craft_ore = 0
 	if res_label:
 		res_label.visible = craft_mode and not to_title
 	if craft_mode and not to_title:
@@ -2277,6 +2414,11 @@ func _add_fever(a: float) -> void:
 		mult *= 0.75  # 契約・魂喰の呪い
 	fever_gauge += a * mult
 	if fever_gauge >= 1.0:
+		if craft_mode:
+			# クラフトモード:ゲージ満タン=クラフトのチャンス(フィーバーなし)
+			fever_gauge = 0.0
+			_offer_levelup()
+			return
 		# ゲージ満タン:先にレベルアップを選ばせ、確定後にフィーバー(無敵)へ
 		fever_gauge = 1.0
 		_fever_pending = true
