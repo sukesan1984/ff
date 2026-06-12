@@ -34,6 +34,13 @@ var over_medal: Label
 var over_new: Label
 var over_souls: Label
 
+# ⛏ クラフトモード(マイクラ風採掘)
+var craft_mode := false
+var blocks: Blocks
+var res := {"d": 0, "s": 0, "i": 0, "g": 0}  # 土/石/鉄+金/ダイヤ
+var res_label: Label
+var mined_count := 0
+
 # デイリー挑戦(全員同じシード世界 + 王者ゴースト並走)
 var daily := false
 var daily_day := ""
@@ -297,6 +304,9 @@ func _ready() -> void:
 	elif OS.has_environment("FF_DAILY"):  # 開発用:デイリー自動プレイ(通信込み)
 		_auto = true
 		_start_daily()
+	elif OS.has_environment("FF_CRAFT"):  # 開発用:クラフト自動プレイ
+		_auto = true
+		_start_craft()
 	else:
 		_refresh_title_rank()
 
@@ -360,6 +370,18 @@ func _build() -> void:
 	daily_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	daily_label.visible = false
 	ui.add_child(daily_label)
+
+	# クラフトモードの資源表示
+	res_label = Label.new()
+	res_label.text = ""
+	res_label.position = Vector2(14, 132)
+	res_label.add_theme_font_size_override("font_size", 19)
+	res_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	res_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	res_label.add_theme_constant_override("outline_size", 6)
+	res_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	res_label.visible = false
+	ui.add_child(res_label)
 
 	_build_title()
 	_build_over()
@@ -448,6 +470,8 @@ func _build_title() -> void:
 	title_rank.add_theme_constant_override("separation", 4)
 	title_rank.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_box.add_child(title_rank)
+	var cb := _mk_button(title_box, "▼ クラフトモード(採掘)", Vector2(W * 0.5 - 130, 748), Vector2(260, 52), _start_craft)
+	cb.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
 	var db := _mk_button(title_box, "★ デイリー挑戦 ★", Vector2(W * 0.5 - 130, 808), Vector2(260, 52), _start_daily)
 	db.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
 	_mk_button(title_box, "魂の祭壇", Vector2(W * 0.5 - 188, 872), Vector2(180, 48), _open_meta)
@@ -584,7 +608,55 @@ func _close_meta() -> void:
 	meta_box.visible = false
 
 
-# ---------------------------------------------------------------- デイリー挑戦
+# ---------------------------------------------------------------- クラフトモード
+func _start_craft() -> void:
+	if state != TITLE or _help_open or _meta_open:
+		return
+	sfx.play("click")
+	craft_mode = true
+	daily = false
+	_reset(false)
+	_floater("クラフトモード！掘って資源を集めろ", Vector2(W * 0.5, H * 0.30), Color(0.6, 0.9, 1.0), 28)
+	_floater("長押しで急降下＝採掘。溶岩は即死！", Vector2(W * 0.5, H * 0.37), Color(1, 0.9, 0.5), 22)
+
+
+func _craft_update(delta: float, dx: float) -> void:
+	blocks.tick(dx)
+	# 鳥が触れたブロックを採掘
+	var mr := cur_radius + 8.0
+	var result := blocks.mine(bird.position, mr)
+	if result["lava"] and not (fever_active or invuln_t > 0.0):
+		_on_hit(false)
+		return
+	for t in result["types"]:
+		mined_count += 1
+		var gain := 1
+		match t:
+			Blocks.DIRT:
+				res["d"] += 1
+				gain = 1
+			Blocks.STONE:
+				res["s"] += 1
+				gain = 2
+			Blocks.IRON:
+				res["i"] += 1
+				gain = 6
+				sfx.play("coin", 1.1)
+			Blocks.GOLD:
+				res["i"] += 2
+				gain = 12
+				sfx.play("coin", 0.95)
+			Blocks.DIAMOND:
+				res["g"] += 1
+				gain = 25
+				sfx.play("powerup", 1.2)
+				_burst(bird.position, Color(0.5, 0.9, 1.0), 10, 150.0, 0.4, 2.5)
+				_floater("ダイヤ！ +25", bird.position + Vector2(0, -42), Color(0.5, 0.95, 1.0), 26)
+		score += gain
+		_add_fever(0.012 if t == Blocks.DIRT else 0.02)
+	res_label.text = "土%d 石%d 鉄%d ◆%d" % [res["d"], res["s"], res["i"], res["g"]]
+
+
 func _start_daily() -> void:
 	if state != TITLE or _help_open or _meta_open:
 		return
@@ -1319,6 +1391,24 @@ func _reset(to_title: bool) -> void:
 	_pressing = false
 	_press_t = 0.0
 	_end_dive()
+	# クラフトモードの地形セットアップ
+	if to_title:
+		craft_mode = false
+	if blocks:
+		blocks.queue_free()
+		blocks = null
+	res = {"d": 0, "s": 0, "i": 0, "g": 0}
+	mined_count = 0
+	if res_label:
+		res_label.visible = craft_mode and not to_title
+	if craft_mode and not to_title:
+		blocks = Blocks.new()
+		blocks.W = W
+		blocks.top_y = 360.0
+		blocks.ground_y = GROUND_Y
+		blocks.setup(randi())
+		world.add_child(blocks)
+
 	# デイリー:世界生成RNGをシード(全員同じコース)。通常はランダム
 	if to_title:
 		daily = false
@@ -1603,8 +1693,13 @@ func _update_play(delta: float) -> void:
 		_on_hit(true)
 		return
 
+	# クラフトモード:ブロック採掘(パイプ等は出さない)
+	if craft_mode:
+		_craft_update(delta, dx)
+		if state != PLAY:
+			return
 	# ボス処理(出現中はパイプを止めて回避アリーナに)
-	if _boss_active:
+	if _boss_active and not craft_mode:
 		_boss.tick(delta)
 		if _boss.lethal() and not (fever_active or invuln_t > 0.0) and _boss.in_band(bird.position.y):
 			_on_hit(false)
@@ -1614,8 +1709,8 @@ func _update_play(delta: float) -> void:
 	elif not _pv and pipes_passed >= _next_boss_at:
 		_start_boss()
 
-	# 生成(ボス中はパイプを出さない)
-	if not _boss_active:
+	# 生成(ボス中・クラフト中はパイプを出さない)
+	if not _boss_active and not craft_mode:
 		spawn_countdown -= dx
 		if spawn_countdown <= 0.0:
 			spawn_countdown += SPACING
@@ -1688,7 +1783,7 @@ func _update_play(delta: float) -> void:
 	scroll_speed = BASE_SPEED + minf(pipes_passed * 6.0, 170.0)
 
 	# バイオーム(地帯)切替
-	if not _pv:
+	if not _pv and not craft_mode:
 		var biome := (pipes_passed / BIOME_LEN) % BIOMES.size()
 		if biome != current_biome:
 			_enter_biome(biome)
@@ -2262,8 +2357,10 @@ func _die() -> void:
 	_burst(bird.position, Color(1, 0.5, 0.2), 32, 300.0, 0.8, 4.5)
 	_burst(bird.position, Color.WHITE, 16, 200.0, 0.6, 3.0)
 
-	# ソウル獲得(メタ進行)
+	# ソウル獲得(メタ進行)。クラフトの鉱石は祭壇に還元=モード融合
 	var earned := int(floor(score / 20.0 * (1.0 + int(meta.get("m_soul", 0)) * 0.25)))
+	if craft_mode:
+		earned += res["i"] * 1 + res["g"] * 4  # 鉄/ダイヤをソウルに
 	souls += earned
 	var new_best := false
 	if score > best:
