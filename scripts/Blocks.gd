@@ -94,6 +94,14 @@ func _gen_column() -> PackedInt32Array:
 		if depth > 40 and rng.randf() < 0.04 + dfrac * 0.06:
 			t = LAVA
 		cells[r] = t
+	# お宝ポケット:ダイヤの塊を溶岩で囲む(トンネルを外れて取りに行く=リスク)
+	if depth > 55 and rng.randf() < 0.06:
+		var pr := int(clampf(_tunnel + rng.randf_range(-3.0, 3.0), 2.0, rows - 3.0))
+		for dr in range(-1, 2):
+			var rr := pr + dr
+			if rr > 0 and rr < rows - 1:
+				cells[rr] = LAVA
+		cells[pr] = DIAMOND  # 中心がダイヤ
 	_since_gate += 1
 	if _since_gate >= 6 and depth > 8:
 		_since_gate = 0
@@ -130,6 +138,29 @@ func _col_at(x: float):
 	return null
 
 
+# 座標中心に半径radius_cellsぶん破壊(クリーパー/TNT用)。鉱石回収。
+func blast(pos: Vector2, radius_cells: int) -> Array:
+	var got: Array = []
+	var crow := int((pos.y - top_y) / CELL)
+	for col in grid:
+		if absf((col["x"] + CELL * 0.5) - pos.x) > CELL * (radius_cells + 0.5):
+			continue
+		var cells: PackedInt32Array = col["cells"]
+		for dr in range(-radius_cells, radius_cells + 1):
+			var rr := crow + dr
+			if rr < 0 or rr >= rows - 1:
+				continue
+			var tt := cells[rr]
+			if tt == AIR or tt == BEDROCK:
+				continue
+			if tt == IRON or tt == GOLD:
+				got.append(IRON)
+			elif tt == DIAMOND:
+				got.append(DIAMOND)
+			cells[rr] = AIR
+	return got
+
+
 # 爆発:中心セルの周囲1マス(3x3)を空気に。鉱石は回収。
 func _explode(center_col, center_row: int, got: Array) -> void:
 	var cx: float = center_col["x"]
@@ -154,7 +185,8 @@ func _explode(center_col, center_row: int, got: Array) -> void:
 ## 採掘。戻り {types:[資源], dead:bool, boom:bool}
 func mine(pos: Vector2, r: float, pick: int) -> Dictionary:
 	var got: Array = []
-	var dead := false
+	var dead := false   # 掘れない硬い壁
+	var lava := false
 	var boom := false
 	var tnts := []
 	for col in grid:
@@ -172,7 +204,7 @@ func mine(pos: Vector2, r: float, pick: int) -> Dictionary:
 			if Vector2(nx, ny).distance_to(pos) >= r:
 				continue
 			if t == LAVA:
-				dead = true
+				lava = true
 			elif t == TNT:
 				cells[row] = AIR
 				tnts.append([col, row])
@@ -185,7 +217,7 @@ func mine(pos: Vector2, r: float, pick: int) -> Dictionary:
 	for pair in tnts:
 		boom = true
 		_explode(pair[0], pair[1], got)
-	return {"types": got, "dead": dead, "boom": boom}
+	return {"types": got, "dead": dead, "lava": lava, "boom": boom}
 
 
 func _draw() -> void:
