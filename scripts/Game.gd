@@ -34,6 +34,18 @@ var over_medal: Label
 var over_new: Label
 var over_souls: Label
 
+# デイリー挑戦(全員同じシード世界 + 王者ゴースト並走)
+var daily := false
+var daily_day := ""
+var rng := RandomNumberGenerator.new()   # 世界生成専用RNG(デイリーでシード固定)
+var run_dist := 0.0
+var ghost: Ghost
+var _ghost_rec: PackedFloat32Array = []
+var _ghost_dist_acc := 0.0
+var _ghost_gone_shown := false
+var _daily_submitted := false
+var daily_label: Label
+
 # メタ進行(魂の祭壇)
 var souls := 0
 var meta := {}                 # id -> 永続強化レベル
@@ -281,6 +293,9 @@ func _ready() -> void:
 	elif OS.has_environment("FF_META"):  # 開発用:祭壇プレビュー
 		souls = 500
 		_open_meta()
+	elif OS.has_environment("FF_DAILY"):  # 開発用:デイリー自動プレイ(通信込み)
+		_auto = true
+		_start_daily()
 	else:
 		_refresh_title_rank()
 
@@ -332,6 +347,18 @@ func _build() -> void:
 	score_label = _mk_label(ui, "0", 36, 70, Color.WHITE)
 	multi_label = _mk_label(ui, "", 108, 26, Color(1, 0.85, 0.3))
 	multi_label.visible = false
+
+	# デイリー挑戦バッジ
+	daily_label = Label.new()
+	daily_label.text = "デイリー挑戦"
+	daily_label.position = Vector2(16, 36)
+	daily_label.add_theme_font_size_override("font_size", 18)
+	daily_label.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	daily_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	daily_label.add_theme_constant_override("outline_size", 6)
+	daily_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	daily_label.visible = false
+	ui.add_child(daily_label)
 
 	_build_title()
 	_build_over()
@@ -420,8 +447,10 @@ func _build_title() -> void:
 	title_rank.add_theme_constant_override("separation", 4)
 	title_rank.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_box.add_child(title_rank)
-	_mk_button(title_box, "魂の祭壇", Vector2(W * 0.5 - 188, 868), Vector2(180, 50), _open_meta)
-	_mk_button(title_box, "あそびかた", Vector2(W * 0.5 + 8, 868), Vector2(180, 50), _open_help)
+	var db := _mk_button(title_box, "★ デイリー挑戦 ★", Vector2(W * 0.5 - 130, 808), Vector2(260, 52), _start_daily)
+	db.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	_mk_button(title_box, "魂の祭壇", Vector2(W * 0.5 - 188, 872), Vector2(180, 48), _open_meta)
+	_mk_button(title_box, "あそびかた", Vector2(W * 0.5 + 8, 872), Vector2(180, 48), _open_help)
 	# 点滅
 	var tw := create_tween().set_loops()
 	tw.tween_property(tap, "modulate:a", 0.25, 0.6).set_trans(Tween.TRANS_SINE)
@@ -457,7 +486,8 @@ func _build_help() -> void:
 		"◆ お宝：危険な場所ほど高得点＆ゲージ大。リスク&リターン\n" + \
 		"◆ ノコギリ：当たると一発。無敵や盾で防げる\n" + \
 		"◆ バイオーム：進むと地帯が変化(重力・速度・すき間も)\n" + \
-		"◆ メダル＆ランキング：スコアで世界と競え！"
+		"◆ メダル＆ランキング：スコアで世界と競え！\n" + \
+		"◆ デイリー挑戦：毎日同じコースで勝負。\n　 本日王者のゴーストと並走できる！"
 	help_box.add_child(body)
 	_mk_button(help_box, "とじる", Vector2(W * 0.5 - 80, 786), Vector2(160, 50), _close_help)
 	help_box.visible = false
@@ -551,6 +581,76 @@ func _close_meta() -> void:
 	sfx.play("click")
 	_meta_open = false
 	meta_box.visible = false
+
+
+# ---------------------------------------------------------------- デイリー挑戦
+func _start_daily() -> void:
+	if state != TITLE or _help_open or _meta_open:
+		return
+	sfx.play("click")
+	_floater("デイリー情報を取得中…", Vector2(W * 0.5, H * 0.55), Color(1, 1, 1), 24)
+	_fetch_daily(func(data):
+		daily = true
+		daily_day = str(data.get("day", Time.get_date_string_from_system().replace("-", "")))
+		_reset(false)
+		_floater("デイリー挑戦！全員同じコース！", Vector2(W * 0.5, H * 0.36), Color(1, 0.85, 0.3), 30)
+		# 王者ゴーストを召喚
+		var g = data.get("ghost")
+		if g is Dictionary and str(g.get("path", "")) != "":
+			ghost = Ghost.new()
+			ghost.champ_name = str(g.get("name", ""))
+			ghost.champ_score = int(g.get("score", 0))
+			var ys := PackedFloat32Array()
+			for part in str(g["path"]).split(",", false):
+				ys.append(float(part))
+			ghost.ys = ys
+			ghost.position = Vector2(BIRD_X - 64, ys[0] if ys.size() > 0 else 420.0)
+			world.add_child(ghost)
+			_floater("王者「%s」のゴーストと並走！" % ghost.champ_name, Vector2(W * 0.5, H * 0.43), Color(0.6, 0.9, 1), 24)
+		else:
+			_floater("まだ王者なし — 初代王者になれ！", Vector2(W * 0.5, H * 0.43), Color(0.6, 0.9, 1), 24))
+
+
+func _fetch_daily(cb: Callable) -> void:
+	var h := HTTPRequest.new()
+	add_child(h)
+	h.request_completed.connect(func(_r, code, _hd, body):
+		var data := {}
+		if code == 200:
+			var j = JSON.parse_string(body.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY:
+				data = j
+		h.queue_free()
+		cb.call(data))
+	var err := h.request(_api_base() + "/api/daily")
+	if err != OK:
+		h.queue_free()
+		cb.call({})
+
+
+func _submit_daily(pname: String, sc: int, path: String, cb: Callable) -> void:
+	var h := HTTPRequest.new()
+	add_child(h)
+	h.request_completed.connect(func(_r, code, _hd, body):
+		var data := {}
+		if code == 200:
+			var j = JSON.parse_string(body.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY:
+				data = j
+		h.queue_free()
+		cb.call(data))
+	var payload := JSON.stringify({"name": pname, "score": sc, "path": path})
+	var err := h.request(_api_base() + "/api/daily", ["Content-Type: application/json"], HTTPClient.METHOD_POST, payload)
+	if err != OK:
+		h.queue_free()
+		cb.call({})
+
+
+func _ghost_path_string() -> String:
+	var parts := PackedStringArray()
+	for y in _ghost_rec:
+		parts.append(str(int(y)))
+	return ",".join(parts)
 
 
 func _build_over() -> void:
@@ -1088,7 +1188,14 @@ func _on_skip() -> void:
 func _open_ranking() -> void:
 	sfx.play("click")
 	_show_ranking_loading()
-	_fetch_scores(func(arr): _render_ranking(arr))
+	if daily:
+		rank_title.text = "★ 今日のランキング ★"
+		_fetch_daily(func(data):
+			var arr: Array = data.get("scores", []) if data is Dictionary else []
+			_render_ranking(arr))
+	else:
+		rank_title.text = "★ ランキング ★"
+		_fetch_scores(func(arr): _render_ranking(arr))
 
 
 func _on_rank_retry() -> void:
@@ -1197,6 +1304,23 @@ func _reset(to_title: bool) -> void:
 	_pressing = false
 	_press_t = 0.0
 	_end_dive()
+	# デイリー:世界生成RNGをシード(全員同じコース)。通常はランダム
+	if to_title:
+		daily = false
+	if daily and daily_day != "":
+		rng.seed = hash("ff_" + daily_day)
+	else:
+		rng.randomize()
+	run_dist = 0.0
+	_ghost_rec = PackedFloat32Array()
+	_ghost_dist_acc = 0.0
+	_ghost_gone_shown = false
+	_daily_submitted = false
+	if ghost:
+		ghost.queue_free()
+		ghost = null
+	if daily_label:
+		daily_label.visible = daily and not to_title
 	if flash_rect:
 		flash_rect.color = Color(1, 1, 1, 0)
 	current_biome = -1
@@ -1425,6 +1549,21 @@ func _update_play(delta: float) -> void:
 	bg.tick(dx, delta)
 	ground.tick(dx)
 
+	# 走行距離 + ゴースト記録/再生(デイリー)
+	run_dist += dx
+	if daily:
+		_ghost_dist_acc += dx
+		while _ghost_dist_acc >= Ghost.STEP_PX and _ghost_rec.size() < 5000:
+			_ghost_dist_acc -= Ghost.STEP_PX
+			_ghost_rec.append(bird.position.y)
+		if ghost:
+			if ghost.alive():
+				ghost.set_dist(run_dist)
+			elif not _ghost_gone_shown:
+				_ghost_gone_shown = true
+				_floater("王者はここで散った…超えろ！", Vector2(W * 0.5, H * 0.34), Color(0.6, 0.9, 1), 28)
+				sfx.play("nice")
+
 	# ダイブ(ホールドで急降下。ノコギリ破壊&ゴブリン捕獲の攻め手)
 	if _pressing and state == PLAY:
 		_press_t += delta
@@ -1573,7 +1712,7 @@ func _spawn_pipe() -> void:
 		gap = 235.0  # PVは見栄え優先で隙間を一定に
 	gap = clampf(gap, 150.0, 320.0)
 	# ノコギリ付きパイプ(進んでから登場)。隙間は広めにして公平に
-	var has_saw := not _pv and pipes_passed >= 16 and randf() < (0.16 + minf(pipes_passed * 0.003, 0.16)) * _biome_saw
+	var has_saw := not _pv and pipes_passed >= 16 and rng.randf() < (0.16 + minf(pipes_passed * 0.003, 0.16)) * _biome_saw
 	if has_saw:
 		gap += 80.0
 	var margin := 90.0
@@ -1583,7 +1722,7 @@ func _spawn_pipe() -> void:
 		# PVは中央寄りに出してAIの上下移動をなめらかに
 		lo = maxf(lo, 330.0)
 		hi = minf(hi, 600.0)
-	var center := randf_range(lo, hi)
+	var center := rng.randf_range(lo, hi)
 	if _pv and _pv_scene == "fever":
 		center = 700.0  # 隙間を下に寄せ、無敵の鳥が上の土管を貫通する画に
 
@@ -1597,13 +1736,13 @@ func _spawn_pipe() -> void:
 	p.position = Vector2(W + 70, 0)
 
 	# 上下に揺れるパイプ(スコアが上がると登場。PVでは安定優先で無効)
-	if not _pv and pipes_passed >= 14 and randf() < 0.33:
+	if not _pv and pipes_passed >= 14 and rng.randf() < 0.33:
 		p.moving = true
 		var room := minf(center - lo, hi - center)
 		p.osc_amp = minf(40.0 + score, 110.0)
 		p.osc_amp = minf(p.osc_amp, room)
-		p.osc_speed = randf_range(1.2, 2.0)
-		p.phase = randf_range(0.0, TAU)
+		p.osc_speed = rng.randf_range(1.2, 2.0)
+		p.phase = rng.randf_range(0.0, TAU)
 
 	# バイオームに合わせて土管色を変える(PVは時間帯ベース)
 	if not _pv and current_biome >= 0:
@@ -1640,32 +1779,32 @@ func _spawn_pipe() -> void:
 			"fever":
 				pass  # すり抜けを見せたいのでコインは出さない
 			_:
-				if randf() < 0.7:
+				if rng.randf() < 0.7:
 					_spawn_coins(mid_x, center, gap)
 		return
 	# パワーアップ(強運で出やすく)
-	if pipes_passed >= 3 and randf() < 0.14 + _lv("luck") * 0.05:
+	if pipes_passed >= 3 and rng.randf() < 0.14 + _lv("luck") * 0.05:
 		_spawn_powerup(mid_x, center)
-	elif randf() < 0.82:
+	elif rng.randf() < 0.82:
 		_spawn_coins(mid_x, center, gap)
 	# でかコイン(隙間の端にハグして出現 → 取りに行くとリスク)
-	if randf() < 0.11 + _lv("biglover") * 0.06:
+	if rng.randf() < 0.11 + _lv("biglover") * 0.06:
 		_spawn_big_coin(center, gap)
 	# ノコギリ(隙間を上下にスイープ)
 	if has_saw:
 		_spawn_saw(center, gap)
 	# お宝(あえて危険な位置に。高額＆ゲージ大でレベルアップを誘う)
-	if pipes_passed >= 6 and randf() < 0.10 + _lv("biglover") * 0.04:
+	if pipes_passed >= 6 and rng.randf() < 0.10 + _lv("biglover") * 0.04:
 		_spawn_treasure(center, gap)
 	# トレジャーゴブリン(稀。金袋を抱えて逃げる)
-	if goblins.is_empty() and pipes_passed >= 10 and randf() < 0.05:
+	if goblins.is_empty() and pipes_passed >= 10 and rng.randf() < 0.05:
 		_spawn_goblin()
 
 
 func _spawn_coins(x: float, center: float, gap: float) -> void:
-	var n := randi_range(3, 5)
-	var pattern := randi() % 3  # 0=縦, 1=上アーチ, 2=下アーチ
-	var cy := center + randf_range(-gap * 0.2, gap * 0.2)
+	var n := rng.randi_range(3, 5)
+	var pattern := rng.randi() % 3  # 0=縦, 1=上アーチ, 2=下アーチ
+	var cy := center + rng.randf_range(-gap * 0.2, gap * 0.2)
 	for i in n:
 		var c := Coin.new()
 		c.value = 2 + _lv("coin") + (3 if _lv("deal_haste") > 0 else 0)
@@ -1697,7 +1836,7 @@ func _spawn_big_coin(center: float, gap: float) -> void:
 	var r := c.radius()
 	var top_edge := center - gap * 0.5 + r + 6.0
 	var bot_edge := center + gap * 0.5 - r - 6.0
-	var y := top_edge if randf() < 0.5 else bot_edge
+	var y := top_edge if rng.randf() < 0.5 else bot_edge
 	c.position = Vector2(W + 70, clampf(y, 90.0, GROUND_Y - 90.0))
 	world.add_child(c)
 	coins.append(c)
@@ -1705,7 +1844,7 @@ func _spawn_big_coin(center: float, gap: float) -> void:
 
 func _spawn_powerup(x: float, center: float) -> void:
 	var u := PowerUp.new()
-	u.kind = randi() % 3
+	u.kind = rng.randi() % 3
 	u.position = Vector2(x, clampf(center, 100.0, GROUND_Y - 100.0))
 	world.add_child(u)
 	powerups.append(u)
@@ -1715,8 +1854,8 @@ func _spawn_saw(center: float, gap: float) -> void:
 	var s := Saw.new()
 	s.lo = center - gap * 0.5 + Saw.RADIUS + 4.0
 	s.hi = center + gap * 0.5 - Saw.RADIUS - 4.0
-	s.phase = randf_range(0.0, TAU)
-	s.speed = randf_range(1.6, 2.4)
+	s.phase = rng.randf_range(0.0, TAU)
+	s.speed = rng.randf_range(1.6, 2.4)
 	s.position = Vector2(W + 70, center)
 	world.add_child(s)
 	saws.append(s)
@@ -1727,7 +1866,7 @@ func _spawn_treasure(center: float, gap: float) -> void:
 	var c := Coin.new()
 	c.treasure = true
 	c.value = 35 + pipes_passed / 2 + _lv("biglover") * 12 + _lv("coin") * 2
-	var spot := randi() % 3
+	var spot := rng.randi() % 3
 	var y := center
 	match spot:
 		0:
@@ -1919,7 +2058,7 @@ func _grant_random_unique() -> void:
 
 func _spawn_goblin() -> void:
 	var g := Goblin.new()
-	g.base_y = randf_range(220.0, GROUND_Y - 220.0)
+	g.base_y = rng.randf_range(220.0, GROUND_Y - 220.0)
 	g.position = Vector2(W + 60, g.base_y)
 	g.drop_t = 0.3
 	world.add_child(g)
@@ -2128,8 +2267,16 @@ func _die() -> void:
 	hud.show_medal = m > 0
 	over_box.visible = true
 
-	# ランキング:トップ10入りなら名前入力へ(PV中は無効)
-	if not _pv:
+	# デイリー:記録+軌跡を自動送信(王者ならゴーストが入れ替わる)
+	if daily and not _pv and not _daily_submitted:
+		_daily_submitted = true
+		var nm := _player_name if _player_name != "" else "ななし"
+		_submit_daily(nm, score, _ghost_path_string(), func(data):
+			var g = data.get("ghost") if data is Dictionary else null
+			if g is Dictionary and int(g.get("score", -1)) == score and str(g.get("name", "")) == nm:
+				_floater("★ 本日の王者に即位！ ★", Vector2(W * 0.5, H * 0.30), Color(1, 0.85, 0.3), 34))
+	# ランキング:トップ10入りなら名前入力へ(通常モードのみ。PV中は無効)
+	if not _pv and not daily:
 		var sc := score
 		_fetch_scores(func(arr):
 			if state == DEAD and not _modal and _qualifies(sc, arr):

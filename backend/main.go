@@ -52,6 +52,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/scores", handleScores)
+	mux.HandleFunc("/api/daily", handleDaily)
 	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("/", serveStatic)
 
@@ -120,6 +121,115 @@ func handleScores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"scores": fetchTop(r.Context())})
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ---------------------------------------------------------------- デイリー挑戦
+// 全員が同じシード(日付)の世界を飛ぶ。日別ランキング + 王者ゴースト(飛行軌跡)。
+
+var jst = time.FixedZone("JST", 9*3600)
+
+const maxPath = 100000 // ゴースト軌跡の最大文字数
+
+type ghostEntry struct {
+	Name  string `firestore:"name" json:"name"`
+	Score int    `firestore:"score" json:"score"`
+	Path  string `firestore:"path" json:"path"`
+}
+
+type dailyPost struct {
+	Name  string `json:"name"`
+	Score int    `json:"score"`
+	Path  string `json:"path"`
+}
+
+func dailyDay() string {
+	return time.Now().In(jst).Format("20060102")
+}
+
+func dailyCollection(day string) string {
+	return "daily_" + day
+}
+
+func fetchDaily(ctx context.Context, day string) ([]scoreEntry, *ghostEntry) {
+	out := []scoreEntry{}
+	it := fsClient.Collection(dailyCollection(day)).OrderBy("score", firestore.Desc).Limit(topN).Documents(ctx)
+	defer it.Stop()
+	for {
+		doc, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("daily query: %v", err)
+			break
+		}
+		var e scoreEntry
+		if doc.DataTo(&e) == nil {
+			out = append(out, e)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	var ghost *ghostEntry
+	gdoc, err := fsClient.Collection("ghosts").Doc(day).Get(ctx)
+	if err == nil {
+		var g ghostEntry
+		if gdoc.DataTo(&g) == nil {
+			ghost = &g
+		}
+	}
+	return out, ghost
+}
+
+func handleDaily(w http.ResponseWriter, r *http.Request) {
+	day := dailyDay()
+	switch r.Method {
+	case http.MethodGet:
+		scores, ghost := fetchDaily(r.Context(), day)
+		writeJSON(w, http.StatusOK, map[string]any{"day": day, "scores": scores, "ghost": ghost})
+	case http.MethodPost:
+		if !allow(clientIP(r)) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited"})
+			return
+		}
+		var body dailyPost
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+		name := sanitizeName(body.Name)
+		if body.Score < 0 || body.Score > maxScore || len(body.Path) > maxPath {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+			return
+		}
+		ctx := r.Context()
+		if _, _, err := fsClient.Collection(dailyCollection(day)).Add(ctx, scoreEntry{Name: name, Score: body.Score}); err != nil {
+			log.Printf("daily add: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store failed"})
+			return
+		}
+		// 王者ゴースト更新(本日の最高スコアなら軌跡を保存)
+		if body.Path != "" {
+			gref := fsClient.Collection("ghosts").Doc(day)
+			cur, err := gref.Get(ctx)
+			replace := true
+			if err == nil {
+				var g ghostEntry
+				if cur.DataTo(&g) == nil && g.Score >= body.Score {
+					replace = false
+				}
+			}
+			if replace {
+				if _, err := gref.Set(ctx, ghostEntry{Name: name, Score: body.Score, Path: body.Path}); err != nil {
+					log.Printf("ghost set: %v", err)
+				}
+			}
+		}
+		scores, ghost := fetchDaily(ctx, day)
+		writeJSON(w, http.StatusOK, map[string]any{"day": day, "scores": scores, "ghost": ghost})
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
